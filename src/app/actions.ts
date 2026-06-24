@@ -6,6 +6,32 @@ import authorityMap from "../data/authority_map.json";
 // Initialize the v2.0.0+ SDK
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
+// Helper to convert coordinates to a real address name via free OpenStreetMap API
+async function reverseGeocode(lat: number, lng: number): Promise<{ addressName: string; district: string }> {
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
+      { headers: { "User-Agent": "CivicAI-Hackathon-App" } }
+    );
+    const data = await response.json();
+    
+    if (data && data.address) {
+      const city = data.address.city || data.address.town || data.address.village || data.address.suburb || "";
+      const state = data.address.state || "";
+      const district = data.address.county || data.address.state_district || (lat > 31.0 ? "Shimla" : "Solan");
+      
+      const addressName = city && state ? `${city}, ${state}` : data.display_name.split(',').slice(0, 3).join(', ');
+      return { addressName, district };
+    }
+  } catch (e) {
+    console.error("Geocoding failed, using fallback.", e);
+  }
+  return { 
+    addressName: lat > 31.0 ? "Shimla, Himachal Pradesh" : "Solan, Himachal Pradesh", 
+    district: lat > 31.0 ? "Shimla" : "Solan" 
+  };
+}
+
 // ==========================================
 // FEATURE 1: VISION ANALYSIS AGENT
 // ==========================================
@@ -32,7 +58,7 @@ export async function analyzeImageAction(base64Image: string, mimeType: string) 
     };
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-3.5-flash", 
       contents: [
         {
           role: "user",
@@ -49,9 +75,6 @@ export async function analyzeImageAction(base64Image: string, mimeType: string) 
   } catch (error: any) {
     console.error("Vision Analysis Error:", error);
 
-    // ==========================================
-    // SAFETY NET: VISION AGENT FALLBACK
-    // ==========================================
     const isRateLimited = error.status === 503 || error.message?.includes("503") || error.message?.includes("UNAVAILABLE") || error.message?.includes("429");
     
     if (isRateLimited) {
@@ -80,7 +103,9 @@ export async function analyzeImageAction(base64Image: string, mimeType: string) 
 // FEATURE 2 & 3: COMPLAINT GENERATION AGENT
 // ==========================================
 export async function generateComplaintAgentAction(visionData: any, lat: number, lng: number) {
-  // Define fallback authority outside the try block so the catch block can use it
+  // 1. Generate a real, dynamic Complaint ID
+  const complaintId = `CIV-${Math.floor(100000 + Math.random() * 900000)}`;
+
   const defaultAuthority = {
     department: "General Administration HP",
     officerName: "Nodal Public Grievance Officer",
@@ -91,18 +116,34 @@ export async function generateComplaintAgentAction(visionData: any, lat: number,
   };
 
   try {
-    const resolvedDistrict = lat > 31.0 ? "Shimla" : "Solan"; 
+    // 2. Fetch actual location name and resolve district
+    const { addressName, district } = await reverseGeocode(lat, lng);
 
-    const match = authorityMap.find(
-      (entry) => entry.district.toLowerCase() === resolvedDistrict.toLowerCase() && entry.category === visionData.issue_category
+    // 3. Smart Authority Routing 
+    let authorityData: any = authorityMap.find(
+      (entry: any) => entry.district?.toLowerCase() === district.toLowerCase() && entry.category === visionData.issue_category
     );
     
-    const authorityData = match || defaultAuthority;
+    // If exact map lookup fails, use keyword intelligence
+    if (!authorityData) {
+      const issueLower = (visionData.issue_category || "").toLowerCase();
+      if (issueLower.includes("pothole") || issueLower.includes("road") || issueLower.includes("street")) {
+        authorityData = {
+          department: "Public Works Department (PWD), Himachal Pradesh",
+          officerName: "Sub-Divisional Engineer (Roads)",
+          phone: "+91-1792-220000",
+          email: "pwd-sol-hp@nic.in",
+          portalUrl: "https://hppwd.gov.in",
+          whatsappNumber: "+919876543210"
+        };
+      } else {
+        authorityData = defaultAuthority;
+      }
+    }
 
     const finalConfigPayload: any = {
-      thinkingConfig: { thinkingLevel: "medium" },
+      thinkingConfig: { thinkingLevel: "low" },
       responseMimeType: "application/json",
-      // ... (schema remains the same)
       responseSchema: {
         type: "object",
         properties: {
@@ -110,33 +151,28 @@ export async function generateComplaintAgentAction(visionData: any, lat: number,
           whatsapp_message: { type: "string" },
           email_subject: { type: "string" },
           email_body: { type: "string" },
-          authority_contact: {
-            type: "object",
-            properties: {
-              department: { type: "string" },
-              officerName: { type: "string" },
-              phone: { type: "string" },
-              email: { type: "string" },
-              portalUrl: { type: "string" },
-              whatsappNumber: { type: "string" }
-            }
-          }
         },
-        required: ["formal_complaint", "whatsapp_message", "email_subject", "email_body", "authority_contact"]
+        required: ["formal_complaint", "whatsapp_message", "email_subject", "email_body"]
       }
     };
 
+    // 4. Upgraded Prompt for Human Tone and Real Addresses
     const finalPrompt = `
-      You are CivicAI, an autonomous civic grievance agent.
-      A user has reported an issue at GPS Coordinates: ${lat}, ${lng}.
-      Vision Analysis Data: ${JSON.stringify(visionData)}
-      Resolved Authority Data: ${JSON.stringify(authorityData)}
+      You are an expert civic drafting agent.
+      
+      CONTEXT METADATA:
+      - Complaint ID: ${complaintId}
+      - Civic Issue: ${visionData.issue_category}
+      - Issue Details: ${visionData.evidence_description}
+      - Resolved Location Name: ${addressName}
+      - GPS Coordinates: ${lat}, ${lng}
+      - Targeted Authority: ${authorityData.department}
 
-      Task: Generate the final 3 outputs simultaneously:
-      1. FORMAL_COMPLAINT: Government-style letter.
-      2. WHATSAPP_MESSAGE: Plain text, short, direct.
-      3. EMAIL_SUBJECT and EMAIL_BODY: Professional email.
-      Return ONLY the strictly formatted JSON.
+      Generate a structured JSON response. Enforce these strict constraints:
+      1. formal_complaint: A formal legal grievance notice referencing municipal guidelines. Must use the Resolved Location Name, NOT raw coordinates. Include the Complaint ID. (Max 120 words).
+      2. whatsapp_message: A punchy, highly casual, human-sounding message to a Junior Engineer (JE). Example tone: "Hi Sir, there is a massive pothole causing traffic at [Location]. Please get this checked." Include the Maps link. (Max 40 words).
+      3. email_subject: A short subject line containing the category and Resolved Location Name. Include the Complaint ID.
+      4. email_body: A structured email incorporating details, Location Name, Coordinates, and urgency (Max 100 words).
     `;
 
     const finalResponse = await ai.models.generateContent({
@@ -147,38 +183,41 @@ export async function generateComplaintAgentAction(visionData: any, lat: number,
 
     const data = JSON.parse(finalResponse.text || "{}");
     data.authority_contact = authorityData;
+    data.resolved_location_name = addressName;
+    data.complaint_id = complaintId; 
 
     return { success: true, data };
 
   } catch (error: any) {
     console.error("Agent Error:", error);
 
-    // ==========================================
-    // THE SAFETY NET: DEMO FALLBACK MODE
-    // ==========================================
-    const isRateLimited = error.status === 503 || error.message?.includes("503") || error.message?.includes("UNAVAILABLE") || error.message?.includes("429");
+    const isRateLimited = error.status === 503 || error.message?.includes("503") || error.message?.includes("429");
     
     if (isRateLimited) {
-      console.warn("API limit hit. Triggering Fallback Mock Data for Demo purposes.");
-      
-      // We dynamically inject the Vision data so it still looks real!
+      const { addressName } = await reverseGeocode(lat, lng);
       const cat = visionData?.issue_category || "civic hazard";
       const desc = visionData?.evidence_description || "visual evidence of infrastructure failure";
 
       return {
         success: true,
-        isDemoFallback: true, // We can use this flag in the UI later to show a small "Demo Mode" badge
+        isDemoFallback: true,
         data: {
-          formal_complaint: `To,\nThe Respected Officer,\n${defaultAuthority.department}\n\nSubject: Urgent Rectification Required for Civic Hazard at GPS: ${lat.toFixed(4)}, ${lng.toFixed(4)}\n\nRespected Sir/Madam,\n\nI am writing to formally report a severe issue classified as a '${cat.replace("_", " ")}' at the aforementioned coordinates.\n\nVisual evidence processed by CivicAI indicates: ${desc}.\n\nUnder the relevant municipal guidelines, I request immediate rectification of this hazard to ensure public safety.\n\nSincerely,\nCivicAI Agent\n[COMPLAINT_ID: CIV-DEMO-999]`,
-          whatsapp_message: `Urgent civic issue (${cat.replace("_", " ")}) detected at ${lat.toFixed(4)}, ${lng.toFixed(4)}. Evidence: ${desc}. Please initiate repairs. [ID: CIV-DEMO-999]`,
-          email_subject: `URGENT: ${cat.toUpperCase()} Reported via CivicAI`,
-          email_body: `Please find the formal complaint generated by CivicAI regarding a high-severity ${cat.replace("_", " ")} issue.\n\nCoordinates: ${lat.toFixed(4)}, ${lng.toFixed(4)}\nPriority: High\n\nAutomated via CivicAI.`,
-          authority_contact: defaultAuthority
+          formal_complaint: `To,\nThe Respected Officer,\nPublic Works Department (PWD)\n\nSubject: Urgent Rectification Required for Civic Hazard at ${addressName} [ID: ${complaintId}]\n\nRespected Sir/Madam,\n\nI am writing to formally report a severe '${cat}' at ${addressName}.\n\nVisual evidence processed indicates: ${desc}.\n\nI request immediate rectification of this hazard.\n\nSincerely,\nCivicAI Agent`,
+          whatsapp_message: `Hi Sir, major ${cat} spotted at ${addressName}. Causing severe traffic risk. Please check this ASAP. 📍 Maps: https://maps.google.com/?q=${lat},${lng} [ID: ${complaintId}]`,
+          email_subject: `URGENT: ${cat.toUpperCase()} at ${addressName} [${complaintId}]`,
+          email_body: `Please find the formal complaint generated regarding a high-severity ${cat}.\n\nLocation: ${addressName}\nPriority: High\n\nAutomated via CivicAI.`,
+          authority_contact: {
+            department: "Public Works Department (PWD), Himachal Pradesh",
+            officerName: "Sub-Divisional Engineer (Roads)",
+            phone: "+91-1792-220000",
+            email: "pwd-hp@nic.in"
+          },
+          resolved_location_name: addressName,
+          complaint_id: complaintId
         }
       };
     }
 
-    // If it's a completely different error, fail normally
     return { success: false, error: `Agent Error: ${error.message || "Unknown error"}` };
   }
 }

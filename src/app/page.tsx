@@ -1,12 +1,15 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { Camera, Upload, RefreshCw, AlertTriangle, CheckCircle, MapPin, FileText, MessageCircle, Mail, User, Save, Check } from "lucide-react";
+import { Camera, Upload, RefreshCw, AlertTriangle, CheckCircle, MapPin, FileText, MessageCircle, Mail, User, Save, Check, Copy, ExternalLink, ArrowRight } from "lucide-react";
 import { analyzeImageAction, generateComplaintAgentAction } from "./actions";
 import { db } from "../lib/firebase";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { useRouter } from "next/navigation"; // NEW: Import Next.js router
 
 export default function Home() {
+  const router = useRouter(); // NEW: Initialize router
+
   const [image, setImage] = useState<string | null>(null);
   const [mimeType, setMimeType] = useState<string>("");
   const [loadingStep, setLoadingStep] = useState<string>(""); 
@@ -15,11 +18,20 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [locationStr, setLocationStr] = useState<string>("");
   
-  // Database submission states
+  // Database & UI States
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
+  const [isSubmitted, setIsSubmitted] = useState<boolean>(false); // NEW: Replaced string with boolean state for screen transition
+  const [copiedPanel, setCopiedPanel] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleCopy = (text: string, panelId: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedPanel(panelId);
+    setTimeout(() => {
+      setCopiedPanel(null);
+    }, 2000);
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -30,7 +42,7 @@ export default function Home() {
     setVisionResult(null);
     setAgentResult(null);
     setLocationStr("");
-    setSubmitSuccess(null);
+    setIsSubmitted(false);
 
     const reader = new FileReader();
     reader.onloadend = () => {
@@ -51,7 +63,7 @@ export default function Home() {
     setError(null);
     setVisionResult(null);
     setAgentResult(null);
-    setSubmitSuccess(null);
+    setIsSubmitted(false);
 
     try {
       const base64Data = image.split(",")[1];
@@ -95,18 +107,18 @@ export default function Home() {
     setError(null);
 
     try {
-      // 1. Hackathon Bypass: Skip Storage, write directly to Firestore
       setLoadingStep("Writing secure record to Firestore...");
       
       const complaintData = {
-        userId: "anonymous_for_now", 
+        complaintId: agentResult.complaint_id, 
+        userId: null, // As requested
         createdAt: serverTimestamp(),
         status: "filed",
-        imageUrl: "Storage bypassed for demo mode", // Replaced actual URL with a safe string
+        imageUrl: "Storage bypassed for demo mode",
         location: {
           lat: Number(locationStr.split(",")[0]) || 30.9045,
           lng: Number(locationStr.split(",")[1]) || 77.0967,
-          address: "Resolved via GPS coordinates",
+          address: agentResult.resolved_location_name || "Resolved via GPS coordinates", 
           ward: "TBD",
           district: Number(locationStr.split(",")[0]) > 31.0 ? "Shimla" : "Solan"
         },
@@ -121,14 +133,12 @@ export default function Home() {
         whatsappMessage: agentResult.whatsapp_message,
         emailBody: agentResult.email_body,
         authorityContact: agentResult.authority_contact,
-        communityVerifications: 1,
-        escalationLevel: 0,
-        lastEscalatedAt: null,
-        resolvedAt: null
       };
 
-      const docRef = await addDoc(collection(db, "complaints"), complaintData);
-      setSubmitSuccess(`SUCCESS: Complaint officially filed with ID: ${docRef.id}`);
+      await addDoc(collection(db, "complaints"), complaintData);
+      
+      // Remove alert and swap the UI state instead
+      setIsSubmitted(true);
       setLoadingStep("");
     } catch (err: any) {
       console.error("Firestore Error:", err);
@@ -147,160 +157,219 @@ export default function Home() {
     setError(null);
     setLoadingStep("");
     setLocationStr("");
-    setSubmitSuccess(null);
+    setIsSubmitted(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   return (
     <main className="max-w-6xl mx-auto p-4 md:p-8">
-      <header className="mb-8 border-b border-slate-800 pb-6">
-        <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
-          CivicAI
-        </h1>
-        <p className="text-slate-400 text-sm mt-1">
-          Autonomous Civic Grievance Agent — Multi-Step Pipeline Validation
-        </p>
+      <header className="mb-8 border-b border-slate-800 pb-6 flex justify-between items-end">
+        <div>
+          <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
+            CivicAI
+          </h1>
+          <p className="text-slate-400 text-sm mt-1">
+            Autonomous Civic Grievance Agent — Multi-Step Pipeline Validation
+          </p>
+        </div>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        
-        {/* Left Column: Input selection */}
-        <div className="lg:col-span-4 space-y-6">
-          <div className="border-2 border-dashed border-slate-800 rounded-xl bg-slate-900/50 p-4 flex flex-col items-center justify-center text-center relative overflow-hidden h-[300px]">
-            {image ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={image} alt="Civic issue" className="absolute inset-0 w-full h-full object-cover rounded-xl" />
-            ) : (
-              <div className="space-y-4">
-                <div className="p-4 bg-slate-800 rounded-full w-16 h-16 flex items-center justify-center mx-auto text-slate-400">
-                  <Camera size={28} />
-                </div>
-                <div>
-                  <p className="font-semibold text-slate-200">Upload Evidence</p>
-                </div>
-              </div>
-            )}
-            <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" capture="environment" className="hidden" />
+      {/* NEW: Conditional UI. If submitted, show confirmation screen. Else, show form. */}
+      {isSubmitted ? (
+        <div className="flex flex-col items-center justify-center py-16 animate-in fade-in zoom-in duration-500">
+          <div className="w-24 h-24 bg-emerald-900/30 rounded-full flex items-center justify-center mb-6 border-4 border-emerald-500 shadow-lg shadow-emerald-900/50">
+            <CheckCircle size={48} className="text-emerald-400" />
+          </div>
+          
+          <h2 className="text-4xl font-black text-slate-100 mb-2 text-center">Complaint Filed Successfully</h2>
+          <p className="text-slate-400 mb-10 text-center max-w-lg">
+            Your grievance has been securely logged in the central database and routed to the correct municipal authority.
+          </p>
+
+          <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl flex flex-col items-center mb-10 shadow-xl w-full max-w-md">
+            <p className="text-sm text-emerald-500 font-bold uppercase tracking-wider mb-2">Official Tracking ID</p>
+            <div className="flex items-center gap-4">
+              <span className="text-4xl font-mono font-black text-emerald-400 tracking-tight">{agentResult.complaint_id}</span>
+              <button onClick={() => handleCopy(agentResult.complaint_id, 'id')} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 transition shadow-sm">
+                {copiedPanel === 'id' ? <Check className="text-emerald-400" size={20} /> : <Copy size={20} />}
+              </button>
+            </div>
           </div>
 
-          <div className="flex flex-col gap-3">
-            {!image ? (
-              <button onClick={triggerFileSelect} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-all">
-                <Upload size={18} /> Select / Take Photo
-              </button>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full max-w-3xl mb-12">
+            {/* WhatsApp Deep Link */}
+            <a 
+              href={`https://wa.me/${(agentResult.authority_contact?.whatsappNumber || "910000000000").replace(/\D/g, '')}?text=${encodeURIComponent(agentResult.whatsapp_message || "")}`} 
+              target="_blank" rel="noopener noreferrer" 
+              className="bg-[#25D366]/10 border border-[#25D366]/30 hover:bg-[#25D366]/20 text-[#25D366] py-5 px-6 rounded-xl flex flex-col items-center justify-center gap-3 transition-all hover:-translate-y-1"
+            >
+              <MessageCircle size={28} />
+              <span className="font-bold">Open WhatsApp</span>
+            </a>
+
+            {/* Email Deep Link */}
+            <a 
+              href={`mailto:${agentResult.authority_contact.email}?subject=${encodeURIComponent(agentResult.email_subject)}&body=${encodeURIComponent(agentResult.email_body)}`}
+              className="bg-blue-500/10 border border-blue-500/30 hover:bg-blue-500/20 text-blue-400 py-5 px-6 rounded-xl flex flex-col items-center justify-center gap-3 transition-all hover:-translate-y-1"
+            >
+              <Mail size={28} />
+              <span className="font-bold">Send Email</span>
+            </a>
+
+            {/* Track Next.js Link */}
+            <button 
+              onClick={() => router.push(`/track/${agentResult.complaint_id}`)}
+              className="bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 text-emerald-400 py-5 px-6 rounded-xl flex flex-col items-center justify-center gap-3 transition-all hover:-translate-y-1"
+            >
+              <ExternalLink size={28} />
+              <span className="font-bold">Track Complaint</span>
+            </button>
+          </div>
+
+          <button onClick={clearAll} className="text-slate-400 hover:text-white font-medium flex items-center gap-2 hover:underline underline-offset-4 transition-colors">
+            Report Another Issue <ArrowRight size={16} />
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          
+          {/* Left Column: Input selection */}
+          <div className="lg:col-span-4 space-y-6">
+            <div className="border-2 border-dashed border-slate-800 rounded-xl bg-slate-900/50 p-4 flex flex-col items-center justify-center text-center relative overflow-hidden h-[300px]">
+              {image ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={image} alt="Civic issue" className="absolute inset-0 w-full h-full object-cover rounded-xl" />
+              ) : (
+                <div className="space-y-4">
+                  <div className="p-4 bg-slate-800 rounded-full w-16 h-16 flex items-center justify-center mx-auto text-slate-400">
+                    <Camera size={28} />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-slate-200">Upload Evidence</p>
+                  </div>
+                </div>
+              )}
+              <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" capture="environment" className="hidden" />
+            </div>
+
+            <div className="flex flex-col gap-3">
+              {!image ? (
+                <button onClick={triggerFileSelect} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-all">
+                  <Upload size={18} /> Select / Take Photo
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={runAutonomousPipeline}
+                    disabled={!!loadingStep || !!agentResult}
+                    className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:bg-cyan-900 disabled:text-cyan-500/50 text-white font-medium py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-all"
+                  >
+                    {loadingStep ? <RefreshCw size={18} className="animate-spin" /> : <CheckCircle size={18} />}
+                    {loadingStep ? "Pipeline Running..." : agentResult ? "Agent Pipeline Complete" : "Deploy Autonomous Agent"}
+                  </button>
+                  <button onClick={clearAll} disabled={!!loadingStep} className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-3 px-4 rounded-lg transition-all">
+                    Reset Form
+                  </button>
+                </>
+              )}
+            </div>
+
+            {loadingStep && (
+              <div className="bg-cyan-950/30 border border-cyan-900/50 rounded-lg p-4 text-sm text-cyan-400 animate-pulse flex items-center gap-3">
+                <RefreshCw size={16} className="animate-spin flex-shrink-0" />
+                <span>{loadingStep}</span>
+              </div>
+            )}
+
+            {error && (
+              <div className="bg-red-950/40 border border-red-900/50 rounded-lg p-4 text-sm text-red-400 flex items-start gap-3">
+                <AlertTriangle className="flex-shrink-0 mt-0.5" size={16} />
+                <span>{error}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Right Column: Multi-Agent Outputs */}
+          <div className="lg:col-span-8 flex flex-col h-full space-y-4">
+
+            {!agentResult ? (
+              <div className="flex-1 bg-slate-900 border border-slate-800 rounded-xl p-8 flex items-center justify-center text-slate-500 text-center italic min-h-[400px]">
+                Awaiting deployment. Upload evidence to generate formal complaints, emails, and WhatsApp escalations.
+              </div>
             ) : (
               <>
-                <button
-                  onClick={runAutonomousPipeline}
-                  disabled={!!loadingStep || !!agentResult}
-                  className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:bg-cyan-900 disabled:text-cyan-500/50 text-white font-medium py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-all"
-                >
-                  {loadingStep ? <RefreshCw size={18} className="animate-spin" /> : <CheckCircle size={18} />}
-                  {loadingStep ? "Pipeline Running..." : agentResult ? "Agent Pipeline Complete" : "Deploy Autonomous Agent"}
-                </button>
-                <button onClick={clearAll} disabled={!!loadingStep} className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-3 px-4 rounded-lg transition-all">
-                  Reset Form
-                </button>
-              </>
-            )}
-          </div>
-
-          {loadingStep && (
-            <div className="bg-cyan-950/30 border border-cyan-900/50 rounded-lg p-4 text-sm text-cyan-400 animate-pulse flex items-center gap-3">
-              <RefreshCw size={16} className="animate-spin flex-shrink-0" />
-              <span>{loadingStep}</span>
-            </div>
-          )}
-
-          {error && (
-            <div className="bg-red-950/40 border border-red-900/50 rounded-lg p-4 text-sm text-red-400 flex items-start gap-3">
-              <AlertTriangle className="flex-shrink-0 mt-0.5" size={16} />
-              <span>{error}</span>
-            </div>
-          )}
-
-          {submitSuccess && (
-            <div className="bg-emerald-950/40 border border-emerald-900/50 rounded-lg p-4 text-sm text-emerald-400 flex items-start gap-3">
-              <Check className="flex-shrink-0 mt-0.5" size={16} />
-              <span className="font-mono">{submitSuccess}</span>
-            </div>
-          )}
-        </div>
-
-        {/* Right Column: Multi-Agent Outputs */}
-        <div className="lg:col-span-8 flex flex-col h-full space-y-4">
-          
-          <div className="flex flex-wrap gap-4 items-center bg-slate-900 p-3 rounded-lg border border-slate-800 text-xs">
-            <div className="flex items-center gap-2 text-slate-400">
-              <MapPin size={14} className="text-emerald-400" />
-              <span>{locationStr ? `GPS: ${locationStr}` : "Awaiting GPS..."}</span>
-            </div>
-            {agentResult?.authority_contact && (
-              <div className="flex items-center gap-2 text-slate-400 border-l border-slate-700 pl-4">
-                <User size={14} className="text-cyan-400" />
-                <span>Routed to: {agentResult.authority_contact.department} ({agentResult.authority_contact.officerName})</span>
-              </div>
-            )}
-          </div>
-
-          {!agentResult ? (
-            <div className="flex-1 bg-slate-900 border border-slate-800 rounded-xl p-8 flex items-center justify-center text-slate-500 text-center italic min-h-[400px]">
-              Awaiting deployment. Upload evidence to generate formal complaints, emails, and WhatsApp escalations.
-            </div>
-          ) : (
-            <>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
-                {/* Formal Letter Box */}
-                <div className="bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden md:col-span-2">
-                  <div className="bg-slate-950 p-3 border-b border-slate-800 flex items-center gap-2 text-emerald-400 font-semibold text-sm">
-                    <FileText size={16} /> Formal Legal Complaint
+                {/* Prominent ID and Location Header */}
+                <div className="bg-emerald-950/40 border border-emerald-900/50 p-5 rounded-xl shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                  <div>
+                    <p className="text-xs text-emerald-500 font-bold uppercase tracking-wider mb-1">Official Complaint ID</p>
+                    <h2 className="text-3xl font-black text-slate-200 tracking-tight">{agentResult.complaint_id}</h2>
                   </div>
-                  <div className="p-4 text-sm text-slate-300 whitespace-pre-wrap font-serif overflow-auto max-h-[250px]">
-                    {agentResult.formal_complaint}
+                  <div className="sm:text-right border-t sm:border-t-0 sm:border-l border-emerald-900/50 pt-3 sm:pt-0 sm:pl-5">
+                    <p className="text-xs text-emerald-500 font-bold uppercase tracking-wider mb-1">Verified Location</p>
+                    <p className="text-lg font-medium text-slate-300">{agentResult.resolved_location_name}</p>
                   </div>
                 </div>
 
-                {/* WhatsApp Box */}
-                <div className="bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden">
-                  <div className="bg-[#128C7E]/20 p-3 border-b border-slate-800 flex items-center gap-2 text-[#25D366] font-semibold text-sm">
-                    <MessageCircle size={16} /> WhatsApp Escalation
-                  </div>
-                  <div className="p-4 text-sm text-slate-300 whitespace-pre-wrap overflow-auto h-[130px]">
-                    {agentResult.whatsapp_message}
-                  </div>
-                </div>
-
-                {/* Email Box */}
-                <div className="bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden">
-                  <div className="bg-blue-900/20 p-3 border-b border-slate-800 flex items-center gap-2 text-blue-400 font-semibold text-sm">
-                    <Mail size={16} /> Email Draft
-                  </div>
-                  <div className="p-4 text-sm text-slate-300 overflow-auto h-[130px] flex flex-col">
-                    <div className="border-b border-slate-800 pb-2 mb-2">
-                      <span className="text-slate-500">Subject:</span> {agentResult.email_subject}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
+                  {/* Formal Letter Box */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden md:col-span-2">
+                    <div className="bg-slate-950 p-3 border-b border-slate-800 flex items-center justify-between text-emerald-400 font-semibold text-sm">
+                      <div className="flex items-center gap-2"><FileText size={16} /> Formal Legal Complaint</div>
+                      <button onClick={() => handleCopy(agentResult.formal_complaint, 'formal')} className="text-slate-400 hover:text-white transition flex items-center gap-1">
+                        {copiedPanel === 'formal' ? <><Check size={14} className="text-emerald-400" /> <span className="text-emerald-400 text-xs">Copied!</span></> : <><Copy size={14} /> <span className="text-xs">Copy</span></>}
+                      </button>
                     </div>
-                    <div className="whitespace-pre-wrap flex-1">{agentResult.email_body}</div>
+                    <div className="p-4 text-sm text-slate-300 whitespace-pre-wrap font-serif overflow-auto max-h-[250px]">
+                      {agentResult.formal_complaint}
+                    </div>
+                  </div>
+
+                  {/* WhatsApp Box */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden">
+                    <div className="bg-[#128C7E]/20 p-3 border-b border-slate-800 flex items-center justify-between text-[#25D366] font-semibold text-sm">
+                      <div className="flex items-center gap-2"><MessageCircle size={16} /> WhatsApp Escalation</div>
+                      <button onClick={() => handleCopy(agentResult.whatsapp_message, 'whatsapp')} className="text-slate-400 hover:text-white transition flex items-center gap-1">
+                        {copiedPanel === 'whatsapp' ? <><Check size={14} className="text-[#25D366]" /> <span className="text-[#25D366] text-xs">Copied!</span></> : <><Copy size={14} /> <span className="text-xs">Copy</span></>}
+                      </button>
+                    </div>
+                    <div className="p-4 text-sm text-slate-300 whitespace-pre-wrap overflow-auto h-[130px]">
+                      {agentResult.whatsapp_message}
+                    </div>
+                  </div>
+
+                  {/* Email Box */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden">
+                    <div className="bg-blue-900/20 p-3 border-b border-slate-800 flex items-center justify-between text-blue-400 font-semibold text-sm">
+                      <div className="flex items-center gap-2"><Mail size={16} /> Email Draft</div>
+                      <button onClick={() => handleCopy(`Subject: ${agentResult.email_subject}\n\n${agentResult.email_body}`, 'email')} className="text-slate-400 hover:text-white transition flex items-center gap-1">
+                        {copiedPanel === 'email' ? <><Check size={14} className="text-blue-400" /> <span className="text-blue-400 text-xs">Copied!</span></> : <><Copy size={14} /> <span className="text-xs">Copy</span></>}
+                      </button>
+                    </div>
+                    <div className="p-4 text-sm text-slate-300 overflow-auto h-[130px] flex flex-col">
+                      <div className="border-b border-slate-800 pb-2 mb-2">
+                        <span className="text-slate-500">Subject:</span> {agentResult.email_subject}
+                      </div>
+                      <div className="whitespace-pre-wrap flex-1">{agentResult.email_body}</div>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Submission Action */}
-              {!submitSuccess && (
+                {/* Submission Action */}
                 <div className="mt-4 flex justify-end">
                   <button
                     onClick={submitComplaint}
                     disabled={isSubmitting}
-                    className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-800 text-white font-medium py-3 px-8 rounded-lg flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-900/20"
+                    className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-800 text-white font-medium py-3 px-8 rounded-lg flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-900/20 hover:scale-[1.02]"
                   >
                     {isSubmitting ? <RefreshCw size={18} className="animate-spin" /> : <Save size={18} />}
                     {isSubmitting ? "Securing Blockchain/DB Record..." : "Submit Official Complaint"}
                   </button>
                 </div>
-              )}
-            </>
-          )}
+              </>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </main>
   );
 }
