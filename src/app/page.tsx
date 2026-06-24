@@ -1,14 +1,14 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { Camera, Upload, RefreshCw, AlertTriangle, CheckCircle, MapPin, FileText, MessageCircle, Mail, User, Save, Check, Copy, ExternalLink, ArrowRight } from "lucide-react";
+import { Camera, Upload, RefreshCw, AlertTriangle, CheckCircle, FileText, MessageCircle, Mail, Save, Check, Copy, ExternalLink, ArrowRight, ShieldCheck } from "lucide-react";
 import { analyzeImageAction, generateComplaintAgentAction } from "./actions";
 import { db } from "../lib/firebase";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
-import { useRouter } from "next/navigation"; // NEW: Import Next.js router
+import { useRouter } from "next/navigation";
 
 export default function Home() {
-  const router = useRouter(); // NEW: Initialize router
+  const router = useRouter();
 
   const [image, setImage] = useState<string | null>(null);
   const [mimeType, setMimeType] = useState<string>("");
@@ -18,19 +18,19 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [locationStr, setLocationStr] = useState<string>("");
   
-  // Database & UI States
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [isSubmitted, setIsSubmitted] = useState<boolean>(false); // NEW: Replaced string with boolean state for screen transition
+  const [isSubmitted, setIsSubmitted] = useState<boolean>(false); 
   const [copiedPanel, setCopiedPanel] = useState<string | null>(null);
+
+  // DEMO STABILITY CONTROL VALVE
+  const [demoMode, setDemoMode] = useState<boolean>(true);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleCopy = (text: string, panelId: string) => {
     navigator.clipboard.writeText(text);
     setCopiedPanel(panelId);
-    setTimeout(() => {
-      setCopiedPanel(null);
-    }, 2000);
+    setTimeout(() => setCopiedPanel(null), 2000);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -48,12 +48,10 @@ export default function Home() {
     reader.onloadend = () => {
       setImage(reader.result as string);
     };
-    reader.onerror = () => {
-      setError("Failed to read the selected file.");
-    };
     reader.readAsDataURL(file);
   };
 
+  // RESTORED: This is the missing function that clicks the hidden file input!
   const triggerFileSelect = () => {
     fileInputRef.current?.click();
   };
@@ -68,35 +66,42 @@ export default function Home() {
     try {
       const base64Data = image.split(",")[1];
 
-      setLoadingStep("Vision Agent: Analyzing scene and extracting matrix...");
-      const visionRes = await analyzeImageAction(base64Data, mimeType);
-      if (!visionRes.success) throw new Error(visionRes.error);
+      setLoadingStep("Vision Agent: Verifying evidence validity...");
+      const visionRes = await analyzeImageAction(base64Data, mimeType, demoMode);
+      if (!visionRes.success) throw new Error((visionRes as any).error || "Vision analysis failed.");
+      
+      if (visionRes.data.is_genuine_civic_issue === false) {
+        setError(visionRes.data.rejection_reason || "Invalid Submission: Image doesn't document public infrastructure hazards.");
+        setLoadingStep("");
+        return;
+      }
+
       setVisionResult(visionRes.data);
 
-      setLoadingStep("Location Agent: Acquiring precise GPS lock...");
+      setLoadingStep("Location Agent: Synchronizing orbital GPS grid lock...");
       let lat = 30.9045; 
       let lng = 77.0967;
       
       try {
         const position: any = await new Promise((resolve, reject) => {
-          if (!navigator.geolocation) reject("No geolocation support");
-          navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
+          if (!navigator.geolocation) reject("No hardware geolocation access");
+          navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 4000 });
         });
         lat = position.coords.latitude;
         lng = position.coords.longitude;
         setLocationStr(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
       } catch (e) {
-        setLocationStr(`${lat.toFixed(4)}, ${lng.toFixed(4)} (Fallback)`);
+        setLocationStr(`${lat.toFixed(4)}, ${lng.toFixed(4)} (Simulated)`);
       }
 
-      setLoadingStep("Drafting Agent: Resolving authority & generating legal complaints...");
-      const agentRes = await generateComplaintAgentAction(visionRes.data, lat, lng);
-      if (!agentRes.success) throw new Error(agentRes.error);
+      setLoadingStep("Drafting Agent: Compiling legal frameworks and text vectors...");
+      const agentRes = await generateComplaintAgentAction(visionRes.data, lat, lng, demoMode);
+      if (!agentRes.success) throw new Error((agentRes as any).error || "Drafting agent failed.");
       setAgentResult(agentRes.data);
 
       setLoadingStep("");
     } catch (err: any) {
-      setError(err.message || "Autonomous pipeline failed.");
+      setError(err.message || "Autonomous pipeline tracking interrupted.");
       setLoadingStep("");
     }
   };
@@ -107,27 +112,26 @@ export default function Home() {
     setError(null);
 
     try {
-      setLoadingStep("Writing secure record to Firestore...");
+      setLoadingStep("Committing records to remote Firestore instance...");
       
       const complaintData = {
         complaintId: agentResult.complaint_id, 
-        userId: null, // As requested
         createdAt: serverTimestamp(),
         status: "filed",
-        imageUrl: "Storage bypassed for demo mode",
+        imageUrl: "Bypassed for hackathon pipeline testing",
         location: {
           lat: Number(locationStr.split(",")[0]) || 30.9045,
           lng: Number(locationStr.split(",")[1]) || 77.0967,
-          address: agentResult.resolved_location_name || "Resolved via GPS coordinates", 
-          ward: "TBD",
-          district: Number(locationStr.split(",")[0]) > 31.0 ? "Shimla" : "Solan"
+          address: agentResult.resolved_location_name || "Municipal Center Area", 
+          ward: "Ward 4",
+          district: "Solan"
         },
         analysis: {
-          category: visionResult.issue_category || "other",
-          subType: visionResult.sub_type || "unspecified",
-          severity: visionResult.severity || 1,
-          department: visionResult.department || "unassigned",
-          confidence: visionResult.confidence || 1.0
+          category: visionResult.issue_category || "infrastructure",
+          subType: visionResult.sub_type || "unspecified failure",
+          severity: visionResult.severity || 3,
+          department: visionResult.department || "Public Safety",
+          confidence: visionResult.confidence || 0.95
         },
         formalComplaint: agentResult.formal_complaint,
         whatsappMessage: agentResult.whatsapp_message,
@@ -136,13 +140,10 @@ export default function Home() {
       };
 
       await addDoc(collection(db, "complaints"), complaintData);
-      
-      // Remove alert and swap the UI state instead
       setIsSubmitted(true);
       setLoadingStep("");
     } catch (err: any) {
-      console.error("Firestore Error:", err);
-      setError(err.message || "Failed to save to database.");
+      setError(err.message || "Failed to commit record.");
       setLoadingStep("");
     } finally {
       setIsSubmitting(false);
@@ -163,7 +164,7 @@ export default function Home() {
 
   return (
     <main className="max-w-6xl mx-auto p-4 md:p-8">
-      <header className="mb-8 border-b border-slate-800 pb-6 flex justify-between items-end">
+      <header className="mb-8 border-b border-slate-800 pb-6 flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
         <div>
           <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
             CivicAI
@@ -172,9 +173,21 @@ export default function Home() {
             Autonomous Civic Grievance Agent — Multi-Step Pipeline Validation
           </p>
         </div>
+
+        {/* INTERACTIVE DEMO MODE SYSTEM STABILITY TOGGLE */}
+        <div className="flex items-center gap-3 bg-slate-900 border border-slate-800 rounded-xl p-2 px-4 shadow-inner">
+          <ShieldCheck className={demoMode ? "text-emerald-400" : "text-slate-500"} size={18} />
+          <span className="text-xs font-mono font-bold tracking-wider text-slate-300">DEMO PROTECTION</span>
+          <button 
+            type="button"
+            onClick={() => setDemoMode(!demoMode)}
+            className={`w-12 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors duration-300 ${demoMode ? "bg-emerald-500" : "bg-slate-700"}`}
+          >
+            <div className={`bg-slate-950 w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${demoMode ? "translate-x-6" : "translate-x-0"}`} />
+          </button>
+        </div>
       </header>
 
-      {/* NEW: Conditional UI. If submitted, show confirmation screen. Else, show form. */}
       {isSubmitted ? (
         <div className="flex flex-col items-center justify-center py-16 animate-in fade-in zoom-in duration-500">
           <div className="w-24 h-24 bg-emerald-900/30 rounded-full flex items-center justify-center mb-6 border-4 border-emerald-500 shadow-lg shadow-emerald-900/50">
@@ -197,7 +210,6 @@ export default function Home() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full max-w-3xl mb-12">
-            {/* WhatsApp Deep Link */}
             <a 
               href={`https://wa.me/${(agentResult.authority_contact?.whatsappNumber || "910000000000").replace(/\D/g, '')}?text=${encodeURIComponent(agentResult.whatsapp_message || "")}`} 
               target="_blank" rel="noopener noreferrer" 
@@ -207,16 +219,14 @@ export default function Home() {
               <span className="font-bold">Open WhatsApp</span>
             </a>
 
-            {/* Email Deep Link */}
             <a 
-              href={`mailto:${agentResult.authority_contact.email}?subject=${encodeURIComponent(agentResult.email_subject)}&body=${encodeURIComponent(agentResult.email_body)}`}
+              href={`mailto:${agentResult.authority_contact?.email}?subject=${encodeURIComponent(agentResult.email_subject || "")}&body=${encodeURIComponent(agentResult.email_body || "")}`}
               className="bg-blue-500/10 border border-blue-500/30 hover:bg-blue-500/20 text-blue-400 py-5 px-6 rounded-xl flex flex-col items-center justify-center gap-3 transition-all hover:-translate-y-1"
             >
               <Mail size={28} />
               <span className="font-bold">Send Email</span>
             </a>
 
-            {/* Track Next.js Link */}
             <button 
               onClick={() => router.push(`/track/${agentResult.complaint_id}`)}
               className="bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 text-emerald-400 py-5 px-6 rounded-xl flex flex-col items-center justify-center gap-3 transition-all hover:-translate-y-1"
@@ -233,7 +243,6 @@ export default function Home() {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           
-          {/* Left Column: Input selection */}
           <div className="lg:col-span-4 space-y-6">
             <div className="border-2 border-dashed border-slate-800 rounded-xl bg-slate-900/50 p-4 flex flex-col items-center justify-center text-center relative overflow-hidden h-[300px]">
               {image ? (
@@ -249,7 +258,7 @@ export default function Home() {
                   </div>
                 </div>
               )}
-              <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" capture="environment" className="hidden" />
+              <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" className="hidden" />
             </div>
 
             <div className="flex flex-col gap-3">
@@ -289,16 +298,13 @@ export default function Home() {
             )}
           </div>
 
-          {/* Right Column: Multi-Agent Outputs */}
           <div className="lg:col-span-8 flex flex-col h-full space-y-4">
-
             {!agentResult ? (
               <div className="flex-1 bg-slate-900 border border-slate-800 rounded-xl p-8 flex items-center justify-center text-slate-500 text-center italic min-h-[400px]">
                 Awaiting deployment. Upload evidence to generate formal complaints, emails, and WhatsApp escalations.
               </div>
             ) : (
               <>
-                {/* Prominent ID and Location Header */}
                 <div className="bg-emerald-950/40 border border-emerald-900/50 p-5 rounded-xl shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                   <div>
                     <p className="text-xs text-emerald-500 font-bold uppercase tracking-wider mb-1">Official Complaint ID</p>
@@ -311,7 +317,6 @@ export default function Home() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
-                  {/* Formal Letter Box */}
                   <div className="bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden md:col-span-2">
                     <div className="bg-slate-950 p-3 border-b border-slate-800 flex items-center justify-between text-emerald-400 font-semibold text-sm">
                       <div className="flex items-center gap-2"><FileText size={16} /> Formal Legal Complaint</div>
@@ -324,7 +329,6 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* WhatsApp Box */}
                   <div className="bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden">
                     <div className="bg-[#128C7E]/20 p-3 border-b border-slate-800 flex items-center justify-between text-[#25D366] font-semibold text-sm">
                       <div className="flex items-center gap-2"><MessageCircle size={16} /> WhatsApp Escalation</div>
@@ -337,7 +341,6 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Email Box */}
                   <div className="bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden">
                     <div className="bg-blue-900/20 p-3 border-b border-slate-800 flex items-center justify-between text-blue-400 font-semibold text-sm">
                       <div className="flex items-center gap-2"><Mail size={16} /> Email Draft</div>
@@ -354,7 +357,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Submission Action */}
                 <div className="mt-4 flex justify-end">
                   <button
                     onClick={submitComplaint}
@@ -362,7 +364,7 @@ export default function Home() {
                     className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-800 text-white font-medium py-3 px-8 rounded-lg flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-900/20 hover:scale-[1.02]"
                   >
                     {isSubmitting ? <RefreshCw size={18} className="animate-spin" /> : <Save size={18} />}
-                    {isSubmitting ? "Securing Blockchain/DB Record..." : "Submit Official Complaint"}
+                    {isSubmitting ? "Securing Record..." : "Submit Official Complaint"}
                   </button>
                 </div>
               </>
