@@ -231,7 +231,7 @@ export default function Home() {
   // ──────────────────────────────────────────────────────────────────────────
 
   return (
-    <main className="w-full max-w-md mx-auto min-h-[100dvh] pb-32 flex flex-col gap-4 px-5 py-5 bg-[#F7F5F0] dark:bg-[#161616]">
+    <main className="w-full max-w-md mx-auto min-h-[100dvh] pb-32 flex flex-col gap-4 px-5 pt-2 bg-[#F7F5F0] dark:bg-[#161616]">
       <style dangerouslySetInnerHTML={{ __html: `
         @keyframes scan { 0%,100%{transform:translateY(0)} 50%{transform:translateY(160px)} }
         .animate-scan { animation: scan 2.5s cubic-bezier(0.4,0,0.2,1) infinite; }
@@ -240,49 +240,6 @@ export default function Home() {
         .civic-btn { transition: transform 0.12s ease, opacity 0.12s ease; }
         .civic-btn:active { transform: scale(0.97); opacity: 0.85; }
       ` }} />
-
-      {/* ── TOPBAR ── */}
-      <div className="flex items-center justify-between pt-1">
-        <div className="flex items-center gap-2.5">
-          {/* brand icon pill */}
-          <div className="w-9 h-9 rounded-[10px] flex items-center justify-center bg-[#E8EBF0] dark:bg-[#1e1e1e]">
-            <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
-              <path d="M10 3v7M10 10l-5 5M10 10l5 5"
-                stroke="#516B8B"
-                className="dark:[stroke:#B6C2D2]"
-                strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              <circle cx="10" cy="10" r="2.5"
-                fill="#516B8B"
-                className="dark:[fill:#B6C2D2]"/>
-            </svg>
-          </div>
-          <span className="text-[18px] font-bold tracking-tight text-[#1E293B] dark:text-[#F0F0F0]">
-            CivicAI
-          </span>
-        </div>
-
-        <div className="flex gap-2">
-          {/* theme toggle */}
-          <button className="civic-btn w-9 h-9 rounded-full flex items-center justify-center bg-[#E8EBF0] dark:bg-[#1e1e1e]">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              {/* moon icon for light mode, sun for dark — purely decorative */}
-              <path d="M13.5 9.5A5.5 5.5 0 016.5 2.5a5.5 5.5 0 100 11 5.5 5.5 0 007-4z"
-                stroke="#516B8B" className="dark:stroke-[#7A8FA6]" strokeWidth="1.4" strokeLinejoin="round"/>
-            </svg>
-          </button>
-
-          {/* notifications */}
-          <button className="civic-btn w-9 h-9 rounded-full flex items-center justify-center relative bg-[#E8EBF0] dark:bg-[#1e1e1e]">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M8 1.5a4.5 4.5 0 00-4.5 4.5c0 2.5-.5 3.5-1 4h11c-.5-.5-1-1.5-1-4A4.5 4.5 0 008 1.5z"
-                stroke="#516B8B" className="dark:stroke-[#7A8FA6]" strokeWidth="1.4" strokeLinejoin="round"/>
-              <path d="M6.5 10v.5a1.5 1.5 0 003 0V10"
-                stroke="#516B8B" className="dark:stroke-[#7A8FA6]" strokeWidth="1.4" strokeLinecap="round"/>
-            </svg>
-            <span className="absolute top-1.5 right-1.5 w-[7px] h-[7px] rounded-full bg-red-500 border-[1.5px] border-[#F7F5F0] dark:border-[#161616]" />
-          </button>
-        </div>
-      </div>
 
       {/* ── HERO + STATS (hidden when camera active) ── */}
       {!stream && (
