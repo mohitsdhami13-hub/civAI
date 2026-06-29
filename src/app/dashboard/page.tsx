@@ -10,22 +10,29 @@ export default function DashboardPage() {
   const [complaints, setComplaints] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Fetch from Firebase
+  // Fetch from Firebase (Both Processed and Pending)
   useEffect(() => {
     const fetchComplaints = async () => {
       try {
-        // REMOVED orderBy() so Firebase doesn't require a composite index
+        // 1. Fetch Finished AI Reports
         const q = query(collection(db, "complaints"), where("userId", "==", "user_solan_resident_01"));
         const snapshot = await getDocs(q);
+        const finishedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), isPending: false }));
         
-        const fetchedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        
-        // Sort locally in JavaScript instead of making Firebase do it
-        fetchedData.sort((a: any, b: any) => {
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        // 2. Fetch Pending/Uploading Media Drafts
+        const p = query(collection(db, "pending_reports"), where("userId", "==", "user_solan_resident_01"));
+        const pendingSnapshot = await getDocs(p);
+        const pendingData = pendingSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), isPending: true }));
+
+        // 3. Combine and Sort Locally
+        const combinedData = [...finishedData, ...pendingData];
+        combinedData.sort((a: any, b: any) => {
+          const dateA = a.createdAt?.seconds ? a.createdAt.seconds * 1000 : new Date(a.createdAt).getTime();
+          const dateB = b.createdAt?.seconds ? b.createdAt.seconds * 1000 : new Date(b.createdAt).getTime();
+          return dateB - dateA;
         });
 
-        setComplaints(fetchedData);
+        setComplaints(combinedData);
       } catch (error) { 
         console.error("Error fetching reports:", error); 
       } finally { 
@@ -37,7 +44,6 @@ export default function DashboardPage() {
 
   // --- DYNAMIC UI HELPERS ---
 
-  // 1. Status configuration (Colors, labels, and progress bar width)
   const getStatusConfig = (status = "pending") => {
     const s = status.toLowerCase();
     if (s === "resolved") return { 
@@ -51,7 +57,6 @@ export default function DashboardPage() {
     };
   };
 
-  // 2. Icon & Color configuration based on AI classification text
   const getCategoryConfig = (type = "") => {
     const t = type.toLowerCase();
     if (t.includes("water") || t.includes("leak") || t.includes("pipe") || t.includes("drain")) {
@@ -66,7 +71,6 @@ export default function DashboardPage() {
     return { Icon: AlertTriangle, color: "text-[#516B8B] dark:text-[#E5E7EB]", bg: "bg-[#E2E8F0] dark:bg-[#27272A]" };
   };
 
-  // 3. Format Firestore Timestamps to "Jun 10" style
   const formatDate = (dateObj: any) => {
     if (!dateObj) return "Just now";
     const date = dateObj.seconds ? new Date(dateObj.seconds * 1000) : new Date(dateObj);
@@ -116,48 +120,68 @@ export default function DashboardPage() {
           
           {/* COMPLAINTS LIST */}
           {complaints.map((complaint) => {
-            const statusConfig = getStatusConfig(complaint.status || "filed");
-            const catConfig = getCategoryConfig(complaint.analysis?.subType || complaint.analysis?.category);
+            const isPending = complaint.isPending;
+            
+            // Dynamic configurations based on status
+            const statusConfig = isPending 
+              ? { label: "Processing", color: "text-[#F59E0B]", bg: "bg-[#FEF3C7] dark:bg-[#78350F]/50", barColor: "bg-[#F59E0B]", width: "15%" }
+              : getStatusConfig(complaint.status || "filed");
+              
+            const catConfig = isPending
+              ? { Icon: Loader2, color: "text-[#516B8B] dark:text-[#E5E7EB]", bg: "bg-[#F3F4F6] dark:bg-[#27272A]" }
+              : getCategoryConfig(complaint.analysis?.subType || complaint.analysis?.category);
+              
             const Icon = catConfig.Icon;
             
-            // Extract a short sector/district name
-            const locationShort = complaint.location?.address?.split(',')[0] || "Solan District";
+            // Fallbacks for missing AI data during pending state
+            const locationShort = isPending ? "Processing Location..." : (complaint.location?.address?.split(',')[0] || "Solan District");
+            const title = isPending ? "AI Analyzing Media..." : (complaint.analysis?.subType || complaint.analysis?.category || "Civic Issue");
 
-            return (
-              <Link href={`/track/${complaint.complaintId || complaint.id}`} key={complaint.id}>
-                <div className="bg-white dark:bg-[#18181B] border border-[#E2E8F0] dark:border-transparent rounded-[24px] p-4 flex items-start gap-4 shadow-sm active:scale-[0.98] transition-transform relative overflow-hidden">
-                  
-                  {/* Category Icon Block */}
-                  <div className={`w-14 h-14 rounded-[16px] ${catConfig.bg} flex items-center justify-center shrink-0`}>
-                    <Icon size={24} className={catConfig.color} strokeWidth={2.5} />
+            // The reusable Card UI
+            const CardContent = (
+              <div className={`bg-white dark:bg-[#18181B] border border-[#E2E8F0] dark:border-transparent rounded-[24px] p-4 flex items-start gap-4 shadow-sm relative overflow-hidden transition-all ${isPending ? 'opacity-80' : 'active:scale-[0.98]'}`}>
+                
+                {/* Category Icon Block */}
+                <div className={`w-14 h-14 rounded-[16px] ${catConfig.bg} flex items-center justify-center shrink-0`}>
+                  <Icon size={24} className={`${catConfig.color} ${isPending ? 'animate-spin' : ''}`} strokeWidth={2.5} />
+                </div>
+                
+                {/* Content Block */}
+                <div className="flex-1 pt-1 pb-2">
+                  <div className="flex justify-between items-start mb-1">
+                    <h3 className="font-bold text-[16px] text-[#1E293B] dark:text-[#E5E7EB] capitalize leading-tight pr-2 line-clamp-1" style={{fontFamily: 'var(--font-jakarta)'}}>
+                      {title}
+                    </h3>
+                    <span className={`${statusConfig.bg} ${statusConfig.color} px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider shrink-0`}>
+                      {statusConfig.label}
+                    </span>
                   </div>
                   
-                  {/* Content Block */}
-                  <div className="flex-1 pt-1 pb-2">
-                    <div className="flex justify-between items-start mb-1">
-                      <h3 className="font-bold text-[16px] text-[#1E293B] dark:text-[#E5E7EB] capitalize leading-tight pr-2 line-clamp-1" style={{fontFamily: 'var(--font-jakarta)'}}>
-                        {complaint.analysis?.subType || complaint.analysis?.category || "Civic Issue"}
-                      </h3>
-                      <span className={`${statusConfig.bg} ${statusConfig.color} px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider shrink-0`}>
-                        {statusConfig.label}
-                      </span>
-                    </div>
-                    
-                    <p className="text-[12px] font-semibold text-[#6B7280] dark:text-[#A1A1AA]">
-                      {locationShort} • {formatDate(complaint.createdAt)} {statusConfig.label === 'Resolved' ? '' : '• Awaiting review'}
-                    </p>
+                  <p className="text-[12px] font-semibold text-[#6B7280] dark:text-[#A1A1AA]">
+                    {locationShort} • {formatDate(complaint.createdAt)} {isPending ? '• Queued' : (statusConfig.label === 'Resolved' ? '' : '• Awaiting review')}
+                  </p>
 
-                    {/* Progress Bar Line */}
-                    <div className="w-full h-1 bg-[#F3F4F6] dark:bg-[#09090B] rounded-full mt-3 overflow-hidden">
-                      <div className={`h-full ${statusConfig.barColor} rounded-full transition-all duration-1000 ease-out`} style={{ width: statusConfig.width }} />
-                    </div>
+                  {/* Progress Bar Line */}
+                  <div className="w-full h-1 bg-[#F3F4F6] dark:bg-[#09090B] rounded-full mt-3 overflow-hidden">
+                    <div className={`h-full ${statusConfig.barColor} rounded-full transition-all duration-1000 ease-out ${isPending ? 'animate-pulse' : ''}`} style={{ width: statusConfig.width }} />
                   </div>
                 </div>
+              </div>
+            );
+
+            // If it's pending, render as a static div (no click). If processed, wrap in a Link.
+            return isPending ? (
+              <div key={complaint.id} className="cursor-wait">
+                {CardContent}
+              </div>
+            ) : (
+              <Link href={`/track/${complaint.complaintId || complaint.id}`} key={complaint.id}>
+                {CardContent}
               </Link>
             );
           })}
 
-          {/* IMPACT SUMMARY CARD (Matches Screenshot) */}
+          {/* IMPACT SUMMARY CARD */}
           <div className="bg-[#F8F9FC] dark:bg-[#18181B] border border-[#E2E8F0] dark:border-transparent rounded-[24px] p-5 mt-2 flex items-center gap-4 shadow-sm">
             <div className="w-12 h-12 bg-white dark:bg-[#09090B] rounded-full flex items-center justify-center shrink-0 shadow-sm">
               <Trophy size={24} className="text-[#516B8B] dark:text-[#E5E7EB]" />
@@ -165,7 +189,7 @@ export default function DashboardPage() {
             <div>
               <h4 className="font-bold text-[16px] text-[#1E293B] dark:text-[#E5E7EB]" style={{fontFamily: 'var(--font-jakarta)'}}>Your impact this month</h4>
               <p className="text-[12px] font-semibold text-[#516B8B] dark:text-[#A1A1AA] mt-0.5">
-                {complaints.length} filed • {resolvedCount} resolved • 45 verifications
+                {complaints.filter(c => !c.isPending).length} filed • {resolvedCount} resolved • 45 verifications
               </p>
             </div>
           </div>
