@@ -2,13 +2,18 @@ import { NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import authorityMap from "@/data/authority_map.json"; 
 
-// Force the route to run on Edge to prevent serverless timeouts
 export const runtime = "edge";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
-// Timeout set to 15 seconds to allow for image processing
 const timeout = (ms: number) => new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), ms));
+
+// ==========================================
+// HACKATHON SECURITY & RATE LIMITING
+// ==========================================
+let globalRequestCount = 0;
+const MAX_GLOBAL_REQUESTS = 200; 
+const MAX_IMAGE_SIZE_MB = 30; // Bumped to 30MB for high-res modern phone cameras
+const rateLimitMap = new Map<string, { count: number; timestamp: number }>();
 
 async function reverseGeocode(lat: number, lng: number): Promise<{ addressName: string; district: string }> {
   try {
@@ -31,12 +36,39 @@ async function reverseGeocode(lat: number, lng: number): Promise<{ addressName: 
 }
 
 export async function POST(request: Request) {
+  // 1. GLOBAL KILL SWITCH
+  if (globalRequestCount >= MAX_GLOBAL_REQUESTS) {
+    return NextResponse.json({ success: false, error: "Hackathon demo limit reached (200 requests)." }, { status: 429 });
+  }
+  globalRequestCount++;
+
+  // 2. IP RATE LIMITING (Max 10 reqs per minute)
+  const ip = request.headers.get("x-forwarded-for") || "unknown_ip";
+  const now = Date.now();
+  const userLimit = rateLimitMap.get(ip);
+  
+  if (userLimit && now - userLimit.timestamp < 60000) {
+    if (userLimit.count >= 10) {
+      return NextResponse.json({ success: false, error: "Too many requests. Please wait 60 seconds." }, { status: 429 });
+    }
+    userLimit.count++;
+  } else {
+    rateLimitMap.set(ip, { count: 1, timestamp: now });
+  }
+
   try {
     const body = await request.json();
     const { image, mimeType, lat, lng } = body; 
 
     if (!image || !mimeType) {
       return NextResponse.json({ success: false, error: "Missing image data." }, { status: 400 });
+    }
+
+    // 3. FILE SIZE LIMITER (30MB Limit)
+    const base64String = image.includes(',') ? image.split(',')[1] : image;
+    const sizeInBytes = (base64String.length * 3) / 4;
+    if (sizeInBytes > MAX_IMAGE_SIZE_MB * 1024 * 1024) {
+      return NextResponse.json({ success: false, error: `Image too large. Maximum size is ${MAX_IMAGE_SIZE_MB}MB.` }, { status: 413 });
     }
 
     const complaintId = `CIV-${Math.floor(100000 + Math.random() * 900000)}`;
@@ -52,10 +84,10 @@ export async function POST(request: Request) {
     };
 
     // ==========================================
-    // 1. LIVE VISION AGENT EXECUTION
+    // 4. LIVE VISION AGENT EXECUTION (Strict Guardrails)
     // ==========================================
     const visionConfig: any = {
-      // Re-enabled the thinking config since 3.5 Flash supports it natively!
+      temperature: 0.0, // FORCES STRICT, DETERMINISTIC, ZERO-HALLUCINATION LOGIC
       thinkingConfig: { thinkingLevel: "low" },
       responseMimeType: "application/json",
       responseSchema: {
@@ -77,13 +109,22 @@ export async function POST(request: Request) {
       },
     };
 
+    // Advanced, strict prompt to eliminate false positives
+    const strictPrompt = `You are a highly analytical, strict Civic Infrastructure Hazard Assessor. 
+    
+    CRITICAL RULES FOR SCANNING:
+    1. FILTER NON-CIVIC IMAGES: First, explicitly scan for human faces, selfies, pets, indoor residential rooms, or screens. If ANY of these are the primary subject, set "is_genuine_civic_issue" to false and state "Image rejected: Non-civic subject detected" in rejection_reason.
+    2. FILTER OPTICAL ILLUSIONS & PATTERNS: Carefully distinguish between actual physical damage and visual patterns. DO NOT classify shadows, wet patches on roads, textured floor tiles, decorative brickwork, or printed designs as hazards (e.g., do not mistake a tile pattern for an electrical circuit, or a dark shadow for a pothole).
+    3. STRICT HAZARD DEFINITION: A genuine civic hazard must be a clear, verifiable case of outdoor public infrastructure failure. Valid examples: a deep physical structural pothole in a paved road, exposed active electrical wires on a public street pole, or a massive uncontained public garbage dump. 
+    4. ZERO HALLUCINATION: If the image is ambiguous, blurry, or you are not 100% certain it is a physical public infrastructure hazard, set "is_genuine_civic_issue" to false. Do not guess.`;
+
     const visionApiCall = ai.models.generateContent({
-      model: "gemini-3.5-flash", // Updated to the newest model!
+      model: "gemini-3.5-flash",
       contents: [
         {
           role: "user",
           parts: [
-            { text: `Analyze this image for civic hazards (roads, sanitation, electrical, water/sewage). If it's a regular selfie, person, text, or household item, set is_genuine_civic_issue to false and populate rejection_reason.` },
+            { text: strictPrompt },
             { inlineData: { data: image, mimeType: mimeType } },
           ],
         },
@@ -94,17 +135,19 @@ export async function POST(request: Request) {
     const visionResponse: any = await Promise.race([visionApiCall, timeout(15000)]);
     const visionData = JSON.parse(visionResponse.text || "{}");
 
+    // Block the request if the AI triggered the rejection rule
     if (visionData.is_genuine_civic_issue === false) {
       return NextResponse.json({ success: false, error: visionData.rejection_reason || "Image rejected by Civic Guardrails." }, { status: 400 });
     }
 
     // ==========================================
-    // 2. LIVE DRAFTING AGENT EXECUTION
+    // 5. LIVE DRAFTING AGENT EXECUTION
     // ==========================================
     let authorityData: any = authorityMap.find((entry: any) => entry.district?.toLowerCase() === district.toLowerCase() && entry.category === visionData.issue_category);
     if (!authorityData) authorityData = defaultAuthority;
 
     const draftConfig: any = {
+      temperature: 0.2, // Slightly higher to allow natural language generation, but still highly grounded
       thinkingConfig: { thinkingLevel: "low" },
       responseMimeType: "application/json",
       responseSchema: {
@@ -122,7 +165,7 @@ export async function POST(request: Request) {
     const draftPrompt = `Generate a structured civic grievance response for ${visionData.issue_category} located at ${addressName} (${lat}, ${lng}). Include Complaint ID: ${complaintId}. Keep text sharp, legal, and under structural length rules. Targeted Authority: ${authorityData.department}`;
 
     const draftApiCall = ai.models.generateContent({
-      model: "gemini-3.5-flash", // Updated to the newest model!
+      model: "gemini-3.5-flash", 
       contents: [{ role: "user", parts: [{ text: draftPrompt }] }],
       config: draftConfig
     });
