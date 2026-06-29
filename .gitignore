@@ -16,7 +16,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 *.tsbuildinfo
-
+.env.local
 .DS_Store
 Thumbs.db
 *.pem
