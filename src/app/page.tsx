@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { storage, db } from "../lib/firebase";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { collection, addDoc, updateDoc, doc } from "firebase/firestore";
 import {
-  Camera as CameraIcon, Image as ImageIcon, X, AlertTriangle,
-  Target, TrendingUp, MapPin, Check, Video, Square
+  Camera as CameraIcon, Image as ImageIcon, X,
+  TrendingUp, Check, Video, Square
 } from "lucide-react";
 
 const triggerHaptic = (pattern: number | number[] = 50) => {
@@ -32,7 +32,7 @@ export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const currentUserId = "user_solan_resident_01"; // Hardcoded for demo
+  const currentUserId = "user_solan_resident_01";
 
   // --- CAMERA PIPELINE ---
   const startCameraPipeline = async () => {
@@ -41,10 +41,12 @@ export default function Home() {
     try {
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
-        audio: false
+        audio: false,
       });
       setStream(mediaStream);
-      setTimeout(() => { if (videoRef.current) videoRef.current.srcObject = mediaStream; }, 50);
+      setTimeout(() => {
+        if (videoRef.current) videoRef.current.srcObject = mediaStream;
+      }, 50);
     } catch (err) {
       console.warn("Camera access denied or unavailable.");
       fileInputRef.current?.click();
@@ -53,7 +55,7 @@ export default function Home() {
 
   const stopCameraPipeline = () => {
     if (stream) {
-      stream.getTracks().forEach(track => track.stop());
+      stream.getTracks().forEach((track) => track.stop());
       setStream(null);
     }
   };
@@ -66,9 +68,7 @@ export default function Home() {
       canvasRef.current.width = videoRef.current.videoWidth;
       canvasRef.current.height = videoRef.current.videoHeight;
       context?.drawImage(videoRef.current, 0, 0);
-
       const base64ForAI = canvasRef.current.toDataURL("image/jpeg", 0.8);
-
       canvasRef.current.toBlob(async (blob) => {
         if (blob) {
           stopCameraPipeline();
@@ -91,7 +91,6 @@ export default function Home() {
 
     mediaRecorder.onstop = async () => {
       const videoBlob = new Blob(videoChunks.current, { type: "video/webm" });
-
       let base64ForAI = "";
       if (videoRef.current && canvasRef.current) {
         const context = canvasRef.current.getContext("2d");
@@ -100,7 +99,6 @@ export default function Home() {
         context?.drawImage(videoRef.current, 0, 0);
         base64ForAI = canvasRef.current.toDataURL("image/jpeg", 0.8);
       }
-
       stopCameraPipeline();
       await uploadAndQueueReport(videoBlob, "video/webm", base64ForAI);
     };
@@ -122,15 +120,12 @@ export default function Home() {
     if (file) {
       const isVideo = file.type.startsWith("video/");
       const reader = new FileReader();
-
       reader.onloadend = async () => {
         const base64ForAI = isVideo
           ? "data:image/jpeg;base64,/9j/4AAQSkZJRgABAAAAAQABAAD/2wBDAP..."
           : (reader.result as string);
-
         await uploadAndQueueReport(file, file.type, base64ForAI);
       };
-
       if (!isVideo) {
         reader.readAsDataURL(file);
       } else {
@@ -140,11 +135,14 @@ export default function Home() {
   };
 
   // --- THE MASTER QUEUE FUNCTION ---
-  const uploadAndQueueReport = async (fileBlob: Blob | File, mimeType: string, base64ForAI: string) => {
+  const uploadAndQueueReport = async (
+    fileBlob: Blob | File,
+    mimeType: string,
+    base64ForAI: string
+  ) => {
     setIsProcessing(true);
     setPipelineStatus("Uploading media securely...");
     setError(null);
-
     try {
       const ext = mimeType.includes("video") ? "webm" : "jpg";
       const storageRef = ref(storage, `reports/${currentUserId}/${Date.now()}.${ext}`);
@@ -167,7 +165,7 @@ export default function Home() {
       } else {
         updateDoc(doc(db, "pending_reports", pendingRef.id), {
           status: "failed",
-          error: "Video processing requires active camera recording."
+          error: "Video processing requires active camera recording.",
         });
       }
 
@@ -176,7 +174,6 @@ export default function Home() {
       setTimeout(() => {
         router.push("/dashboard");
       }, 800);
-
     } catch (err: any) {
       console.error("Upload failed:", err);
       setError("Failed to upload media. Check your connection.");
@@ -186,7 +183,9 @@ export default function Home() {
 
   // --- BACKGROUND AI RUNNER ---
   const runBackgroundAI = (base64Img: string, docId: string) => {
-    const cleanBase64 = base64Img.includes(",") ? base64Img.split(",")[1] : base64Img;
+    const cleanBase64 = base64Img.includes(",")
+      ? base64Img.split(",")[1]
+      : base64Img;
 
     fetch("/api/analyze", {
       method: "POST",
@@ -195,132 +194,154 @@ export default function Home() {
         image: cleanBase64,
         mimeType: "image/jpeg",
         lat: 30.9045,
-        lng: 77.0967
+        lng: 77.0967,
       }),
-      cache: "no-store"
+      cache: "no-store",
     })
-      .then(res => res.json())
+      .then((res) => res.json())
       .then(async (payload) => {
         if (payload.success) {
           await updateDoc(doc(db, "pending_reports", docId), {
             status: "ready",
             visionData: payload.visionData,
-            agentResult: payload.agentResult
+            agentResult: payload.agentResult,
           });
         } else {
-          await updateDoc(doc(db, "pending_reports", docId), { status: "failed", error: payload.error });
+          await updateDoc(doc(db, "pending_reports", docId), {
+            status: "failed",
+            error: payload.error,
+          });
         }
       })
       .catch(async () => {
-        await updateDoc(doc(db, "pending_reports", docId), { status: "failed", error: "AI Timeout" });
+        await updateDoc(doc(db, "pending_reports", docId), {
+          status: "failed",
+          error: "AI Timeout",
+        });
       });
   };
 
-  // ─── DESIGN TOKENS ────────────────────────────────────────────────────────
-  // bg:       #161616  (page)
-  // card:     #1e1e1e  (surfaces)
-  // accent:   #B6C2D2  (Kashmir blue — RGB 182,194,210)
-  // accent-dim: #1c2330 (tinted dark bg for icon wells & rings)
-  // muted:    #555     (secondary labels)
-  // text:     #f0f0f0  (primary)
+  // ─── COLOUR TOKENS ────────────────────────────────────────────────────────
+  // Light:  page #F7F5F0 · card #FFFFFF · icon-pill #E8EBF0
+  //         text-primary #1E293B · text-muted #64748B
+  //         accent #516B8B · accent-tint #EEF1F6
+  // Dark:   page #161616 · card #1e1e1e · icon-pill #1c2330
+  //         text-primary #F0F0F0 · text-muted #555555
+  //         accent #B6C2D2 · accent-tint #1c2330
   // ──────────────────────────────────────────────────────────────────────────
 
   return (
-    <main
-      className="w-full max-w-md mx-auto min-h-[100dvh] pb-32 flex flex-col gap-4 px-5 py-5"
-      style={{ background: "#161616" }}
-    >
+    <main className="w-full max-w-md mx-auto min-h-[100dvh] pb-32 flex flex-col gap-4 px-5 py-5 bg-[#F7F5F0] dark:bg-[#161616]">
       <style dangerouslySetInnerHTML={{ __html: `
         @keyframes scan { 0%,100%{transform:translateY(0)} 50%{transform:translateY(160px)} }
         .animate-scan { animation: scan 2.5s cubic-bezier(0.4,0,0.2,1) infinite; }
         @keyframes pulse-ring { 0%{box-shadow:0 0 0 0 rgba(239,68,68,0.7)} 70%{box-shadow:0 0 0 15px rgba(239,68,68,0)} 100%{box-shadow:0 0 0 0 rgba(239,68,68,0)} }
         .animate-pulse-ring { animation: pulse-ring 1.5s cubic-bezier(0.4,0,0.6,1) infinite; }
         .civic-btn { transition: transform 0.12s ease, opacity 0.12s ease; }
-        .civic-btn:active { transform: scale(0.97); opacity: 0.88; }
+        .civic-btn:active { transform: scale(0.97); opacity: 0.85; }
       ` }} />
 
       {/* ── TOPBAR ── */}
       <div className="flex items-center justify-between pt-1">
         <div className="flex items-center gap-2.5">
-          <div
-            className="w-9 h-9 rounded-[10px] flex items-center justify-center"
-            style={{ background: "#1e1e1e" }}
-          >
-            {/* brand mark */}
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-              <path d="M10 3v7M10 10l-5 5M10 10l5 5" stroke="#B6C2D2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              <circle cx="10" cy="10" r="2.5" fill="#B6C2D2"/>
+          {/* brand icon pill */}
+          <div className="w-9 h-9 rounded-[10px] flex items-center justify-center bg-[#E8EBF0] dark:bg-[#1e1e1e]">
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+              <path d="M10 3v7M10 10l-5 5M10 10l5 5"
+                stroke="#516B8B"
+                className="dark:[stroke:#B6C2D2]"
+                strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <circle cx="10" cy="10" r="2.5"
+                fill="#516B8B"
+                className="dark:[fill:#B6C2D2]"/>
             </svg>
           </div>
-          <span className="text-[18px] font-bold tracking-tight" style={{ color: "#f0f0f0" }}>CivicAI</span>
+          <span className="text-[18px] font-bold tracking-tight text-[#1E293B] dark:text-[#F0F0F0]">
+            CivicAI
+          </span>
         </div>
+
         <div className="flex gap-2">
-          {/* theme icon */}
-          <button className="civic-btn w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "#1e1e1e" }}>
+          {/* theme toggle */}
+          <button className="civic-btn w-9 h-9 rounded-full flex items-center justify-center bg-[#E8EBF0] dark:bg-[#1e1e1e]">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <circle cx="8" cy="8" r="3" stroke="#666" strokeWidth="1.5"/>
-              <path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3.05 3.05l1.06 1.06M11.89 11.89l1.06 1.06M3.05 12.95l1.06-1.06M11.89 4.11l1.06-1.06" stroke="#666" strokeWidth="1.5" strokeLinecap="round"/>
+              {/* moon icon for light mode, sun for dark — purely decorative */}
+              <path d="M13.5 9.5A5.5 5.5 0 016.5 2.5a5.5 5.5 0 100 11 5.5 5.5 0 007-4z"
+                stroke="#516B8B" className="dark:stroke-[#7A8FA6]" strokeWidth="1.4" strokeLinejoin="round"/>
             </svg>
           </button>
+
           {/* notifications */}
-          <button className="civic-btn w-9 h-9 rounded-full flex items-center justify-center relative" style={{ background: "#1e1e1e" }}>
+          <button className="civic-btn w-9 h-9 rounded-full flex items-center justify-center relative bg-[#E8EBF0] dark:bg-[#1e1e1e]">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M8 1.5a4.5 4.5 0 00-4.5 4.5c0 2.5-.5 3.5-1 4h11c-.5-.5-1-1.5-1-4A4.5 4.5 0 008 1.5z" stroke="#666" strokeWidth="1.5" strokeLinejoin="round"/>
-              <path d="M6.5 10v.5a1.5 1.5 0 003 0V10" stroke="#666" strokeWidth="1.5" strokeLinecap="round"/>
+              <path d="M8 1.5a4.5 4.5 0 00-4.5 4.5c0 2.5-.5 3.5-1 4h11c-.5-.5-1-1.5-1-4A4.5 4.5 0 008 1.5z"
+                stroke="#516B8B" className="dark:stroke-[#7A8FA6]" strokeWidth="1.4" strokeLinejoin="round"/>
+              <path d="M6.5 10v.5a1.5 1.5 0 003 0V10"
+                stroke="#516B8B" className="dark:stroke-[#7A8FA6]" strokeWidth="1.4" strokeLinecap="round"/>
             </svg>
-            <span className="absolute top-1.5 right-1.5 w-[7px] h-[7px] rounded-full bg-red-500 border-[1.5px] border-[#161616]" />
+            <span className="absolute top-1.5 right-1.5 w-[7px] h-[7px] rounded-full bg-red-500 border-[1.5px] border-[#F7F5F0] dark:border-[#161616]" />
           </button>
         </div>
       </div>
 
-      {/* ── HERO + STATS (hidden when camera is active) ── */}
+      {/* ── HERO + STATS (hidden when camera active) ── */}
       {!stream && (
         <>
           {/* Hero card */}
-          <div
-            className="rounded-[20px] px-6 py-[22px] relative"
-            style={{ background: "#1e1e1e" }}
-          >
-            <p className="text-[11px] font-semibold tracking-[1.2px] uppercase mb-2" style={{ color: "#B6C2D2" }}>
+          <div className="rounded-[20px] px-6 py-[22px] relative bg-white dark:bg-[#1e1e1e]">
+            <p className="text-[11px] font-semibold tracking-[1.2px] uppercase mb-2 text-[#516B8B] dark:text-[#B6C2D2]">
               Your city
             </p>
-            <h1 className="text-[28px] font-bold leading-[1.15] tracking-tight" style={{ color: "#f0f0f0" }}>
+            <h1 className="text-[28px] font-bold leading-[1.15] tracking-tight text-[#1E293B] dark:text-[#F0F0F0]">
               Spot it.<br />Report it.
             </h1>
-            <p className="text-[14px] mt-1.5" style={{ color: "#555" }}>Fix your city together</p>
-
+            <p className="text-[14px] mt-1.5 text-[#64748B] dark:text-[#555]">
+              Fix your city together
+            </p>
             {/* accent circle */}
-            <div
-              className="absolute right-5 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full flex items-center justify-center"
-              style={{ background: "#1c2330", border: "1.5px solid rgba(182,194,210,0.18)" }}
-            >
+            <div className="absolute right-5 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full flex items-center justify-center bg-[#EEF1F6] dark:bg-[#1c2330] border border-[#D4DAE4] dark:border-[rgba(182,194,210,0.18)]">
               <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-                <path d="M11 4v3M11 15v3M4 11h3M15 11h3" stroke="#B6C2D2" strokeWidth="1.8" strokeLinecap="round"/>
-                <circle cx="11" cy="11" r="3" stroke="#B6C2D2" strokeWidth="1.8"/>
+                <path d="M11 4v3M11 15v3M4 11h3M15 11h3"
+                  stroke="#516B8B" className="dark:stroke-[#B6C2D2]"
+                  strokeWidth="1.8" strokeLinecap="round"/>
+                <circle cx="11" cy="11" r="3"
+                  stroke="#516B8B" className="dark:stroke-[#B6C2D2]"
+                  strokeWidth="1.8"/>
               </svg>
             </div>
           </div>
 
           {/* Stat cards */}
           <div className="grid grid-cols-2 gap-2.5">
-            <div className="rounded-[16px] p-4 flex items-center gap-3" style={{ background: "#1e1e1e" }}>
-              <div className="w-[38px] h-[38px] rounded-[12px] flex items-center justify-center shrink-0" style={{ background: "#1c2330" }}>
-                <TrendingUp size={18} color="#B6C2D2" strokeWidth={2} />
+            {/* City rank */}
+            <div className="rounded-[16px] p-4 flex items-center gap-3 bg-white dark:bg-[#1e1e1e]">
+              <div className="w-[38px] h-[38px] rounded-[12px] flex items-center justify-center shrink-0 bg-[#EEF1F6] dark:bg-[#1c2330]">
+                <TrendingUp size={18} className="text-[#516B8B] dark:text-[#B6C2D2]" strokeWidth={2} />
               </div>
               <div>
-                <p className="text-[20px] font-bold leading-none tracking-tight" style={{ color: "#f0f0f0" }}>#12</p>
-                <p className="text-[12px] mt-1" style={{ color: "#555" }}>City rank</p>
-                <p className="text-[11px] font-semibold" style={{ color: "#B6C2D2" }}>↑ 3 this week</p>
+                <p className="text-[20px] font-bold leading-none tracking-tight text-[#1E293B] dark:text-[#F0F0F0]">
+                  #12
+                </p>
+                <p className="text-[12px] mt-1 text-[#64748B] dark:text-[#555]">City rank</p>
+                <p className="text-[11px] font-semibold text-[#516B8B] dark:text-[#B6C2D2]">
+                  ↑ 3 this week
+                </p>
               </div>
             </div>
-            <div className="rounded-[16px] p-4 flex items-center gap-3" style={{ background: "#1e1e1e" }}>
-              <div className="w-[38px] h-[38px] rounded-[12px] flex items-center justify-center shrink-0" style={{ background: "#1c2330" }}>
-                <Check size={18} color="#B6C2D2" strokeWidth={2.5} />
+
+            {/* Resolved */}
+            <div className="rounded-[16px] p-4 flex items-center gap-3 bg-white dark:bg-[#1e1e1e]">
+              <div className="w-[38px] h-[38px] rounded-[12px] flex items-center justify-center shrink-0 bg-[#EEF1F6] dark:bg-[#1c2330]">
+                <Check size={18} className="text-[#516B8B] dark:text-[#B6C2D2]" strokeWidth={2.5} />
               </div>
               <div>
-                <p className="text-[20px] font-bold leading-none tracking-tight" style={{ color: "#f0f0f0" }}>1.2k</p>
-                <p className="text-[12px] mt-1" style={{ color: "#555" }}>Resolved</p>
-                <p className="text-[11px] font-semibold" style={{ color: "#B6C2D2" }}>this month</p>
+                <p className="text-[20px] font-bold leading-none tracking-tight text-[#1E293B] dark:text-[#F0F0F0]">
+                  1.2k
+                </p>
+                <p className="text-[12px] mt-1 text-[#64748B] dark:text-[#555]">Resolved</p>
+                <p className="text-[11px] font-semibold text-[#516B8B] dark:text-[#B6C2D2]">
+                  this month
+                </p>
               </div>
             </div>
           </div>
@@ -329,8 +350,9 @@ export default function Home() {
 
       {/* ── SCANNER / CAMERA ZONE ── */}
       <div
-        className={`relative w-full ${stream ? "h-[60vh]" : "min-h-[190px]"} rounded-[20px] overflow-hidden flex flex-col items-center justify-center transition-all duration-300`}
-        style={{ background: "#1e1e1e" }}
+        className={`relative w-full ${
+          stream ? "h-[60vh]" : "min-h-[200px]"
+        } rounded-[20px] overflow-hidden flex flex-col items-center justify-center transition-all duration-300 bg-white dark:bg-[#1e1e1e]`}
       >
         {stream ? (
           /* ── LIVE CAMERA VIEW ── */
@@ -343,7 +365,7 @@ export default function Home() {
               className="absolute inset-0 w-full h-full object-cover"
             />
 
-            {/* corner brackets overlay */}
+            {/* corner brackets */}
             <div className="absolute inset-0 z-10 p-8 flex flex-col justify-between pointer-events-none">
               <div className="flex justify-between w-full">
                 <div className="w-8 h-8 border-t-[2.5px] border-l-[2.5px] border-white/70 rounded-tl-sm" />
@@ -361,7 +383,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* close button */}
+            {/* close */}
             {!isProcessing && (
               <button
                 onClick={stopCameraPipeline}
@@ -374,69 +396,80 @@ export default function Home() {
         ) : (
           /* ── IDLE SCANNER UI ── */
           <div className="flex flex-col items-center justify-center gap-0 px-6 pb-6 pt-7 w-full">
-            {/* concentric rings */}
+            {/* concentric rings — light uses slate tints, dark uses blue tints */}
             <div
-              className="w-24 h-24 rounded-full flex items-center justify-center mb-[18px]"
-              style={{ border: "1.5px solid rgba(182,194,210,0.15)" }}
+              className="w-24 h-24 rounded-full flex items-center justify-center mb-[18px] border border-[#D4DAE4] dark:border-[rgba(182,194,210,0.15)]"
             >
-              <div
-                className="w-[72px] h-[72px] rounded-full flex items-center justify-center"
-                style={{ border: "1.5px solid rgba(182,194,210,0.25)" }}
-              >
-                <div
-                  className="w-[50px] h-[50px] rounded-full flex items-center justify-center"
-                  style={{ background: "#1c2330", border: "1.5px solid #B6C2D2" }}
-                >
-                  {/* scanner QR icon */}
+              <div className="w-[72px] h-[72px] rounded-full flex items-center justify-center border border-[#C2CAD6] dark:border-[rgba(182,194,210,0.25)]">
+                <div className="w-[50px] h-[50px] rounded-full flex items-center justify-center bg-[#EEF1F6] dark:bg-[#1c2330] border border-[#516B8B] dark:border-[#B6C2D2]">
                   <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-                    <rect x="3" y="3" width="7" height="7" rx="1.5" stroke="#B6C2D2" strokeWidth="1.6"/>
-                    <rect x="12" y="3" width="7" height="7" rx="1.5" stroke="#B6C2D2" strokeWidth="1.6"/>
-                    <rect x="3" y="12" width="7" height="7" rx="1.5" stroke="#B6C2D2" strokeWidth="1.6"/>
-                    <path d="M12 15.5h7M15.5 12v7" stroke="#B6C2D2" strokeWidth="1.6" strokeLinecap="round"/>
+                    <rect x="3" y="3" width="7" height="7" rx="1.5"
+                      stroke="#516B8B" className="dark:stroke-[#B6C2D2]" strokeWidth="1.6"/>
+                    <rect x="12" y="3" width="7" height="7" rx="1.5"
+                      stroke="#516B8B" className="dark:stroke-[#B6C2D2]" strokeWidth="1.6"/>
+                    <rect x="3" y="12" width="7" height="7" rx="1.5"
+                      stroke="#516B8B" className="dark:stroke-[#B6C2D2]" strokeWidth="1.6"/>
+                    <path d="M12 15.5h7M15.5 12v7"
+                      stroke="#516B8B" className="dark:stroke-[#B6C2D2]"
+                      strokeWidth="1.6" strokeLinecap="round"/>
                   </svg>
                 </div>
               </div>
             </div>
 
-            <p className="text-[13px] font-medium mb-1" style={{ color: "#555" }}>
+            <p className="text-[13px] font-medium mb-1 text-[#64748B] dark:text-[#555]">
               {isProcessing ? pipelineStatus : "Aim at any civic issue to report it"}
             </p>
 
             {/* status dot */}
             {!isProcessing && (
               <div className="flex items-center gap-[5px] mb-[18px]">
-                <span className="w-[6px] h-[6px] rounded-full inline-block" style={{ background: "#B6C2D2" }} />
-                <span className="text-[11px] font-medium tracking-[0.3px]" style={{ color: "#B6C2D2" }}>Camera ready</span>
+                <span className="w-[6px] h-[6px] rounded-full inline-block bg-[#516B8B] dark:bg-[#B6C2D2]" />
+                <span className="text-[11px] font-medium tracking-[0.3px] text-[#516B8B] dark:text-[#B6C2D2]">
+                  Camera ready
+                </span>
               </div>
             )}
 
             {error && (
-              <p className="text-[12px] font-semibold text-red-400 mb-3">{error}</p>
+              <p className="text-[12px] font-semibold text-red-500 dark:text-red-400 mb-3">
+                {error}
+              </p>
             )}
 
-            {/* ── ACTION BUTTONS (inside card) ── */}
+            {/* ── ACTION BUTTONS (inside scanner card) ── */}
             {!isProcessing && (
               <div className="grid grid-cols-2 gap-2.5 w-full">
-                {/* Take photo → opens camera */}
+                {/* Take photo */}
                 <button
                   onClick={startCameraPipeline}
                   disabled={isProcessing}
-                  className="civic-btn h-[52px] rounded-[14px] flex items-center justify-center gap-2 disabled:opacity-40"
-                  style={{ background: "#1c2330", border: "1.5px solid #B6C2D2" }}
+                  className="civic-btn h-[52px] rounded-[14px] flex items-center justify-center gap-2 disabled:opacity-40
+                    bg-[#EEF1F6] border border-[#516B8B]
+                    dark:bg-[#1c2330] dark:border-[#B6C2D2]"
                 >
-                  <CameraIcon size={17} color="#B6C2D2" strokeWidth={2} />
-                  <span className="text-[14px] font-bold" style={{ color: "#B6C2D2" }}>Take photo</span>
+                  <CameraIcon size={17}
+                    className="text-[#516B8B] dark:text-[#B6C2D2]"
+                    strokeWidth={2} />
+                  <span className="text-[14px] font-bold text-[#516B8B] dark:text-[#B6C2D2]">
+                    Take photo
+                  </span>
                 </button>
 
-                {/* Choose photo → gallery */}
+                {/* Choose photo */}
                 <button
                   onClick={() => { triggerHaptic(30); fileInputRef.current?.click(); }}
                   disabled={isProcessing}
-                  className="civic-btn h-[52px] rounded-[14px] flex items-center justify-center gap-2 disabled:opacity-40"
-                  style={{ background: "#1c2330", border: "1.5px solid rgba(182,194,210,0.35)" }}
+                  className="civic-btn h-[52px] rounded-[14px] flex items-center justify-center gap-2 disabled:opacity-40
+                    bg-[#EEF1F6] border border-[#A3B0C0]
+                    dark:bg-[#1c2330] dark:border-[rgba(182,194,210,0.35)]"
                 >
-                  <ImageIcon size={17} color="rgba(182,194,210,0.7)" strokeWidth={2} />
-                  <span className="text-[14px] font-medium" style={{ color: "rgba(182,194,210,0.7)" }}>Choose photo</span>
+                  <ImageIcon size={17}
+                    className="text-[#64748B] dark:text-[rgba(182,194,210,0.7)]"
+                    strokeWidth={2} />
+                  <span className="text-[14px] font-medium text-[#64748B] dark:text-[rgba(182,194,210,0.7)]">
+                    Choose photo
+                  </span>
                 </button>
               </div>
             )}
@@ -456,22 +489,31 @@ export default function Home() {
 
         {/* Loading overlay */}
         {isProcessing && (
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm z-50 flex flex-col items-center justify-center gap-3">
-            <div className="w-10 h-10 border-4 rounded-full animate-spin" style={{ borderColor: "rgba(182,194,210,0.25)", borderTopColor: "#B6C2D2" }} />
-            <span className="text-[14px] font-semibold" style={{ color: "#B6C2D2" }}>{pipelineStatus}</span>
+          <div className="absolute inset-0 bg-white/60 dark:bg-black/50 backdrop-blur-sm z-50 flex flex-col items-center justify-center gap-3">
+            <div
+              className="w-10 h-10 border-4 rounded-full animate-spin"
+              style={{
+                borderColor: "rgba(81,107,139,0.2)",
+                borderTopColor: "#516B8B",
+              }}
+            />
+            <span className="text-[14px] font-semibold text-[#516B8B] dark:text-[#B6C2D2]">
+              {pipelineStatus}
+            </span>
           </div>
         )}
       </div>
 
-      {/* ── IN-CAMERA CONTROLS (photo + video) — shown only when stream is active ── */}
+      {/* ── IN-CAMERA CONTROLS — shown only when stream is live ── */}
       {stream && !isProcessing && (
         <div className="flex gap-3 w-full">
           {/* Photo capture */}
           <button
             onClick={captureImage}
             disabled={isRecording || isProcessing}
-            className="civic-btn flex-1 h-[60px] rounded-[18px] flex items-center justify-center gap-2 font-bold text-[16px] disabled:opacity-40"
-            style={{ background: "#1c2330", border: "1.5px solid #B6C2D2", color: "#B6C2D2" }}
+            className="civic-btn flex-1 h-[60px] rounded-[18px] flex items-center justify-center gap-2 font-bold text-[16px] disabled:opacity-40
+              bg-[#EEF1F6] border border-[#516B8B] text-[#516B8B]
+              dark:bg-[#1c2330] dark:border-[#B6C2D2] dark:text-[#B6C2D2]"
           >
             <CameraIcon size={20} strokeWidth={2} />
             Photo
@@ -481,8 +523,7 @@ export default function Home() {
           {isRecording ? (
             <button
               onClick={stopRecording}
-              className="civic-btn flex-1 h-[60px] rounded-[18px] flex items-center justify-center gap-2 font-bold text-[16px] text-white animate-pulse-ring"
-              style={{ background: "#EF4444" }}
+              className="civic-btn flex-1 h-[60px] rounded-[18px] flex items-center justify-center gap-2 font-bold text-[16px] text-white bg-red-500 animate-pulse-ring"
             >
               <Square size={18} fill="currentColor" />
               Stop
@@ -491,8 +532,9 @@ export default function Home() {
             <button
               onClick={startRecording}
               disabled={isProcessing}
-              className="civic-btn flex-1 h-[60px] rounded-[18px] flex items-center justify-center gap-2 font-bold text-[16px] disabled:opacity-40"
-              style={{ background: "#1c2330", border: "1.5px solid rgba(182,194,210,0.35)", color: "rgba(182,194,210,0.75)" }}
+              className="civic-btn flex-1 h-[60px] rounded-[18px] flex items-center justify-center gap-2 font-bold text-[16px] disabled:opacity-40
+                bg-[#EEF1F6] border border-[#A3B0C0] text-[#64748B]
+                dark:bg-[#1c2330] dark:border-[rgba(182,194,210,0.35)] dark:text-[rgba(182,194,210,0.75)]"
             >
               <Video size={18} strokeWidth={2} />
               Video
