@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { storage, db } from "../lib/firebase";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { collection, addDoc, updateDoc, doc } from "firebase/firestore";
-import { 
-  Camera as CameraIcon, Image as ImageIcon, X, AlertTriangle, 
+import {
+  Camera as CameraIcon, Image as ImageIcon, X, AlertTriangle,
   Target, TrendingUp, MapPin, Check, Video, Square
 } from "lucide-react";
 
@@ -22,7 +22,7 @@ export default function Home() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [pipelineStatus, setPipelineStatus] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
-  
+
   // Video Recording States
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -31,7 +31,7 @@ export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
+
   const currentUserId = "user_solan_resident_01"; // Hardcoded for demo
 
   // --- CAMERA PIPELINE ---
@@ -39,16 +39,15 @@ export default function Home() {
     triggerHaptic(30);
     setError(null);
     try {
-      // Request video (audio optional to prevent permission crashes)
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ 
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
-        audio: false 
+        audio: false
       });
       setStream(mediaStream);
       setTimeout(() => { if (videoRef.current) videoRef.current.srcObject = mediaStream; }, 50);
     } catch (err) {
       console.warn("Camera access denied or unavailable.");
-      fileInputRef.current?.click(); // Fallback to gallery
+      fileInputRef.current?.click();
     }
   };
 
@@ -67,9 +66,9 @@ export default function Home() {
       canvasRef.current.width = videoRef.current.videoWidth;
       canvasRef.current.height = videoRef.current.videoHeight;
       context?.drawImage(videoRef.current, 0, 0);
-      
+
       const base64ForAI = canvasRef.current.toDataURL("image/jpeg", 0.8);
-      
+
       canvasRef.current.toBlob(async (blob) => {
         if (blob) {
           stopCameraPipeline();
@@ -84,17 +83,15 @@ export default function Home() {
     if (!stream) return;
     triggerHaptic(50);
     videoChunks.current = [];
-    const mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
-    
+    const mediaRecorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+
     mediaRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) videoChunks.current.push(e.data);
     };
-    
+
     mediaRecorder.onstop = async () => {
-      const videoBlob = new Blob(videoChunks.current, { type: 'video/webm' });
-      
-      // Extract a single frame to send to the Vision AI 
-      // (because 15s edge functions can't process a full raw video file)
+      const videoBlob = new Blob(videoChunks.current, { type: "video/webm" });
+
       let base64ForAI = "";
       if (videoRef.current && canvasRef.current) {
         const context = canvasRef.current.getContext("2d");
@@ -103,7 +100,7 @@ export default function Home() {
         context?.drawImage(videoRef.current, 0, 0);
         base64ForAI = canvasRef.current.toDataURL("image/jpeg", 0.8);
       }
-      
+
       stopCameraPipeline();
       await uploadAndQueueReport(videoBlob, "video/webm", base64ForAI);
     };
@@ -123,23 +120,21 @@ export default function Home() {
   const handleGalleryUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const isVideo = file.type.startsWith('video/');
+      const isVideo = file.type.startsWith("video/");
       const reader = new FileReader();
-      
+
       reader.onloadend = async () => {
-        // If it's a video from gallery, we'll send a placeholder image to AI to prevent crash
-        // In a true prod app, you'd extract a frame here.
-        const base64ForAI = isVideo 
-          ? "data:image/jpeg;base64,/9j/4AAQSkZJRgABAAAAAQABAAD/2wBDAP..." // Dummy clear frame fallback
+        const base64ForAI = isVideo
+          ? "data:image/jpeg;base64,/9j/4AAQSkZJRgABAAAAAQABAAD/2wBDAP..."
           : (reader.result as string);
-          
+
         await uploadAndQueueReport(file, file.type, base64ForAI);
       };
-      
+
       if (!isVideo) {
         reader.readAsDataURL(file);
       } else {
-        uploadAndQueueReport(file, file.type, ""); // Pass empty for video fallback
+        uploadAndQueueReport(file, file.type, "");
       }
     }
   };
@@ -151,36 +146,31 @@ export default function Home() {
     setError(null);
 
     try {
-      // 1. Upload Media to Firebase Storage
-      const ext = mimeType.includes('video') ? 'webm' : 'jpg';
+      const ext = mimeType.includes("video") ? "webm" : "jpg";
       const storageRef = ref(storage, `reports/${currentUserId}/${Date.now()}.${ext}`);
       const snapshot = await uploadBytes(storageRef, fileBlob);
       const downloadURL = await getDownloadURL(snapshot.ref);
 
       setPipelineStatus("Creating tracking token...");
 
-      // 2. Create the "Pending" Draft in Firestore
       const pendingRef = await addDoc(collection(db, "pending_reports"), {
         userId: currentUserId,
         mediaUrl: downloadURL,
         mediaType: mimeType,
-        status: "processing", // The Dashboard reads this!
+        status: "processing",
         createdAt: new Date().toISOString(),
-        location: { lat: 30.9045, lng: 77.0967 }, // Demo coordinates
+        location: { lat: 30.9045, lng: 77.0967 },
       });
 
-      // 3. Trigger the AI in the background (Do NOT await this)
       if (base64ForAI) {
         runBackgroundAI(base64ForAI, pendingRef.id);
       } else {
-        // Fallback if gallery video extraction fails
-        updateDoc(doc(db, "pending_reports", pendingRef.id), { 
-          status: "failed", 
-          error: "Video processing requires active camera recording." 
+        updateDoc(doc(db, "pending_reports", pendingRef.id), {
+          status: "failed",
+          error: "Video processing requires active camera recording."
         });
       }
 
-      // 4. Send user to Dashboard instantly
       setPipelineStatus("Queued! Redirecting...");
       triggerHaptic([50, 100]);
       setTimeout(() => {
@@ -195,9 +185,8 @@ export default function Home() {
   };
 
   // --- BACKGROUND AI RUNNER ---
-  // This runs asynchronously so the user doesn't have to wait on this screen!
   const runBackgroundAI = (base64Img: string, docId: string) => {
-    const cleanBase64 = base64Img.includes(',') ? base64Img.split(',')[1] : base64Img;
+    const cleanBase64 = base64Img.includes(",") ? base64Img.split(",")[1] : base64Img;
 
     fetch("/api/analyze", {
       method: "POST",
@@ -208,190 +197,309 @@ export default function Home() {
         lat: 30.9045,
         lng: 77.0967
       }),
-      cache: 'no-store'
+      cache: "no-store"
     })
-    .then(res => res.json())
-    .then(async (payload) => {
-      if (payload.success) {
-        // Update the draft to "ready" - Dashboard will let user click it!
-        await updateDoc(doc(db, "pending_reports", docId), {
-          status: "ready", 
-          visionData: payload.visionData,
-          agentResult: payload.agentResult
-        });
-      } else {
-        await updateDoc(doc(db, "pending_reports", docId), { status: "failed", error: payload.error });
-      }
-    })
-    .catch(async (err) => {
-      await updateDoc(doc(db, "pending_reports", docId), { status: "failed", error: "AI Timeout" });
-    });
+      .then(res => res.json())
+      .then(async (payload) => {
+        if (payload.success) {
+          await updateDoc(doc(db, "pending_reports", docId), {
+            status: "ready",
+            visionData: payload.visionData,
+            agentResult: payload.agentResult
+          });
+        } else {
+          await updateDoc(doc(db, "pending_reports", docId), { status: "failed", error: payload.error });
+        }
+      })
+      .catch(async () => {
+        await updateDoc(doc(db, "pending_reports", docId), { status: "failed", error: "AI Timeout" });
+      });
   };
 
+  // ─── DESIGN TOKENS ────────────────────────────────────────────────────────
+  // bg:       #161616  (page)
+  // card:     #1e1e1e  (surfaces)
+  // accent:   #B6C2D2  (Kashmir blue — RGB 182,194,210)
+  // accent-dim: #1c2330 (tinted dark bg for icon wells & rings)
+  // muted:    #555     (secondary labels)
+  // text:     #f0f0f0  (primary)
+  // ──────────────────────────────────────────────────────────────────────────
+
   return (
-    <main className="px-5 py-4 w-full max-w-md mx-auto flex flex-col gap-5 min-h-[100dvh] pb-32 bg-[#FCFAF5] dark:bg-[#09090B]">
-      
-      <style dangerouslySetInnerHTML={{__html: `
-        @keyframes scan { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(160px); } }
-        .animate-scan { animation: scan 2.5s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
-        @keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
-        .animate-pulse-ring { animation: pulse-ring 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-      `}} />
+    <main
+      className="w-full max-w-md mx-auto min-h-[100dvh] pb-32 flex flex-col gap-4 px-5 py-5"
+      style={{ background: "#161616" }}
+    >
+      <style dangerouslySetInnerHTML={{ __html: `
+        @keyframes scan { 0%,100%{transform:translateY(0)} 50%{transform:translateY(160px)} }
+        .animate-scan { animation: scan 2.5s cubic-bezier(0.4,0,0.2,1) infinite; }
+        @keyframes pulse-ring { 0%{box-shadow:0 0 0 0 rgba(239,68,68,0.7)} 70%{box-shadow:0 0 0 15px rgba(239,68,68,0)} 100%{box-shadow:0 0 0 0 rgba(239,68,68,0)} }
+        .animate-pulse-ring { animation: pulse-ring 1.5s cubic-bezier(0.4,0,0.6,1) infinite; }
+        .civic-btn { transition: transform 0.12s ease, opacity 0.12s ease; }
+        .civic-btn:active { transform: scale(0.97); opacity: 0.88; }
+      ` }} />
 
-      <div className="flex flex-col gap-4 w-full">
-        {/* HERO HEADER */}
-        {!stream && (
+      {/* ── TOPBAR ── */}
+      <div className="flex items-center justify-between pt-1">
+        <div className="flex items-center gap-2.5">
+          <div
+            className="w-9 h-9 rounded-[10px] flex items-center justify-center"
+            style={{ background: "#1e1e1e" }}
+          >
+            {/* brand mark */}
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <path d="M10 3v7M10 10l-5 5M10 10l5 5" stroke="#B6C2D2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <circle cx="10" cy="10" r="2.5" fill="#B6C2D2"/>
+            </svg>
+          </div>
+          <span className="text-[18px] font-bold tracking-tight" style={{ color: "#f0f0f0" }}>CivicAI</span>
+        </div>
+        <div className="flex gap-2">
+          {/* theme icon */}
+          <button className="civic-btn w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "#1e1e1e" }}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <circle cx="8" cy="8" r="3" stroke="#666" strokeWidth="1.5"/>
+              <path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3.05 3.05l1.06 1.06M11.89 11.89l1.06 1.06M3.05 12.95l1.06-1.06M11.89 4.11l1.06-1.06" stroke="#666" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+          </button>
+          {/* notifications */}
+          <button className="civic-btn w-9 h-9 rounded-full flex items-center justify-center relative" style={{ background: "#1e1e1e" }}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M8 1.5a4.5 4.5 0 00-4.5 4.5c0 2.5-.5 3.5-1 4h11c-.5-.5-1-1.5-1-4A4.5 4.5 0 008 1.5z" stroke="#666" strokeWidth="1.5" strokeLinejoin="round"/>
+              <path d="M6.5 10v.5a1.5 1.5 0 003 0V10" stroke="#666" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+            <span className="absolute top-1.5 right-1.5 w-[7px] h-[7px] rounded-full bg-red-500 border-[1.5px] border-[#161616]" />
+          </button>
+        </div>
+      </div>
+
+      {/* ── HERO + STATS (hidden when camera is active) ── */}
+      {!stream && (
+        <>
+          {/* Hero card */}
+          <div
+            className="rounded-[20px] px-6 py-[22px] relative"
+            style={{ background: "#1e1e1e" }}
+          >
+            <p className="text-[11px] font-semibold tracking-[1.2px] uppercase mb-2" style={{ color: "#B6C2D2" }}>
+              Your city
+            </p>
+            <h1 className="text-[28px] font-bold leading-[1.15] tracking-tight" style={{ color: "#f0f0f0" }}>
+              Spot it.<br />Report it.
+            </h1>
+            <p className="text-[14px] mt-1.5" style={{ color: "#555" }}>Fix your city together</p>
+
+            {/* accent circle */}
+            <div
+              className="absolute right-5 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full flex items-center justify-center"
+              style={{ background: "#1c2330", border: "1.5px solid rgba(182,194,210,0.18)" }}
+            >
+              <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+                <path d="M11 4v3M11 15v3M4 11h3M15 11h3" stroke="#B6C2D2" strokeWidth="1.8" strokeLinecap="round"/>
+                <circle cx="11" cy="11" r="3" stroke="#B6C2D2" strokeWidth="1.8"/>
+              </svg>
+            </div>
+          </div>
+
+          {/* Stat cards */}
+          <div className="grid grid-cols-2 gap-2.5">
+            <div className="rounded-[16px] p-4 flex items-center gap-3" style={{ background: "#1e1e1e" }}>
+              <div className="w-[38px] h-[38px] rounded-[12px] flex items-center justify-center shrink-0" style={{ background: "#1c2330" }}>
+                <TrendingUp size={18} color="#B6C2D2" strokeWidth={2} />
+              </div>
+              <div>
+                <p className="text-[20px] font-bold leading-none tracking-tight" style={{ color: "#f0f0f0" }}>#12</p>
+                <p className="text-[12px] mt-1" style={{ color: "#555" }}>City rank</p>
+                <p className="text-[11px] font-semibold" style={{ color: "#B6C2D2" }}>↑ 3 this week</p>
+              </div>
+            </div>
+            <div className="rounded-[16px] p-4 flex items-center gap-3" style={{ background: "#1e1e1e" }}>
+              <div className="w-[38px] h-[38px] rounded-[12px] flex items-center justify-center shrink-0" style={{ background: "#1c2330" }}>
+                <Check size={18} color="#B6C2D2" strokeWidth={2.5} />
+              </div>
+              <div>
+                <p className="text-[20px] font-bold leading-none tracking-tight" style={{ color: "#f0f0f0" }}>1.2k</p>
+                <p className="text-[12px] mt-1" style={{ color: "#555" }}>Resolved</p>
+                <p className="text-[11px] font-semibold" style={{ color: "#B6C2D2" }}>this month</p>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── SCANNER / CAMERA ZONE ── */}
+      <div
+        className={`relative w-full ${stream ? "h-[60vh]" : "min-h-[190px]"} rounded-[20px] overflow-hidden flex flex-col items-center justify-center transition-all duration-300`}
+        style={{ background: "#1e1e1e" }}
+      >
+        {stream ? (
+          /* ── LIVE CAMERA VIEW ── */
           <>
-            <div className="relative w-full h-[160px] bg-[#E2E8F0] dark:bg-[#18181B] rounded-[24px] overflow-hidden p-6 flex flex-col justify-center">
-              <div className="absolute top-1/2 left-0 right-0 h-1 bg-[#516B8B] dark:bg-[#3F3F46] opacity-30 transform -translate-y-1/2 rotate-[-8deg] scale-110"></div>
-              <div className="absolute top-1/2 left-0 right-0 h-1 bg-[#516B8B] dark:bg-[#3F3F46] opacity-60 transform -translate-y-1/2 rotate-[5deg] scale-110"></div>
-              <div className="absolute left-[20%] top-[45%] w-10 h-10 bg-[#FFD166] rounded-full opacity-40 blur-md dark:opacity-10"></div>
-              <div className="absolute left-[25%] top-[50%] w-6 h-8 bg-black dark:bg-white rounded-lg opacity-80 rotate-12 z-10 flex items-center justify-center">
-                 <div className="w-1 h-3 bg-white dark:bg-black rounded-full"></div>
-              </div>
-              <div className="absolute right-[30%] top-[30%] w-8 h-8 bg-[#FFD166] dark:bg-[#27272A] rounded-full z-10 flex items-center justify-center font-black text-[#516B8B] dark:text-[#E5E7EB] text-lg shadow-sm">!</div>
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="absolute inset-0 w-full h-full object-cover"
+            />
 
-              <div className="relative z-20">
-                <h1 className="text-[28px] font-black text-[#1E293B] dark:text-[#E5E7EB] leading-[1.1]" style={{fontFamily: 'var(--font-jakarta)'}}>
-                  Spot it.<br/>Report it.
-                </h1>
-                <p className="text-[14px] font-semibold text-[#516B8B] dark:text-[#A1A1AA] mt-1 tracking-wide">Fix your city together</p>
+            {/* corner brackets overlay */}
+            <div className="absolute inset-0 z-10 p-8 flex flex-col justify-between pointer-events-none">
+              <div className="flex justify-between w-full">
+                <div className="w-8 h-8 border-t-[2.5px] border-l-[2.5px] border-white/70 rounded-tl-sm" />
+                <div className="w-8 h-8 border-t-[2.5px] border-r-[2.5px] border-white/70 rounded-tr-sm" />
+              </div>
+              {isRecording && (
+                <div className="absolute top-5 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-md text-white font-bold px-4 py-1.5 rounded-full flex items-center gap-2 text-sm z-20">
+                  <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse inline-block" />
+                  Recording
+                </div>
+              )}
+              <div className="flex justify-between w-full">
+                <div className="w-8 h-8 border-b-[2.5px] border-l-[2.5px] border-white/70 rounded-bl-sm" />
+                <div className="w-8 h-8 border-b-[2.5px] border-r-[2.5px] border-white/70 rounded-br-sm" />
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-white dark:bg-[#18181B] border border-[#E2E8F0] dark:border-transparent rounded-[20px] p-4 flex items-center gap-3 shadow-sm">
-                <div className="w-10 h-10 rounded-xl bg-[#FFF8E7] dark:bg-[#27272A] flex items-center justify-center shrink-0">
-                  <TrendingUp size={20} className="text-[#F59E0B] dark:text-[#E5E7EB]" strokeWidth={3} />
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-[20px] font-black text-[#1E293B] dark:text-[#E5E7EB] leading-none" style={{fontFamily: 'var(--font-jakarta)'}}>#12</span>
-                  <span className="text-[11px] font-medium text-[#6B7280] dark:text-[#A1A1AA] mt-1">City rank <span className="text-[#10B981] font-bold">↑3</span></span>
-                </div>
-              </div>
-              <div className="bg-white dark:bg-[#18181B] border border-[#E2E8F0] dark:border-transparent rounded-[20px] p-4 flex items-center gap-3 shadow-sm">
-                <div className="w-10 h-10 rounded-xl bg-[#D1FAE5] dark:bg-[#27272A] flex items-center justify-center shrink-0">
-                  <Check size={20} className="text-[#10B981] dark:text-[#10B981]" strokeWidth={3} />
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-[20px] font-black text-[#1E293B] dark:text-[#E5E7EB] leading-none" style={{fontFamily: 'var(--font-jakarta)'}}>1.2k</span>
-                  <span className="text-[11px] font-medium text-[#6B7280] dark:text-[#A1A1AA] mt-1">Resolved this month</span>
-                </div>
-              </div>
-            </div>
+            {/* close button */}
+            {!isProcessing && (
+              <button
+                onClick={stopCameraPipeline}
+                className="civic-btn absolute top-4 right-4 w-10 h-10 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center text-white z-20"
+              >
+                <X size={18} />
+              </button>
+            )}
           </>
+        ) : (
+          /* ── IDLE SCANNER UI ── */
+          <div className="flex flex-col items-center justify-center gap-0 px-6 pb-6 pt-7 w-full">
+            {/* concentric rings */}
+            <div
+              className="w-24 h-24 rounded-full flex items-center justify-center mb-[18px]"
+              style={{ border: "1.5px solid rgba(182,194,210,0.15)" }}
+            >
+              <div
+                className="w-[72px] h-[72px] rounded-full flex items-center justify-center"
+                style={{ border: "1.5px solid rgba(182,194,210,0.25)" }}
+              >
+                <div
+                  className="w-[50px] h-[50px] rounded-full flex items-center justify-center"
+                  style={{ background: "#1c2330", border: "1.5px solid #B6C2D2" }}
+                >
+                  {/* scanner QR icon */}
+                  <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+                    <rect x="3" y="3" width="7" height="7" rx="1.5" stroke="#B6C2D2" strokeWidth="1.6"/>
+                    <rect x="12" y="3" width="7" height="7" rx="1.5" stroke="#B6C2D2" strokeWidth="1.6"/>
+                    <rect x="3" y="12" width="7" height="7" rx="1.5" stroke="#B6C2D2" strokeWidth="1.6"/>
+                    <path d="M12 15.5h7M15.5 12v7" stroke="#B6C2D2" strokeWidth="1.6" strokeLinecap="round"/>
+                  </svg>
+                </div>
+              </div>
+            </div>
+
+            <p className="text-[13px] font-medium mb-1" style={{ color: "#555" }}>
+              {isProcessing ? pipelineStatus : "Aim at any civic issue to report it"}
+            </p>
+
+            {/* status dot */}
+            {!isProcessing && (
+              <div className="flex items-center gap-[5px] mb-[18px]">
+                <span className="w-[6px] h-[6px] rounded-full inline-block" style={{ background: "#B6C2D2" }} />
+                <span className="text-[11px] font-medium tracking-[0.3px]" style={{ color: "#B6C2D2" }}>Camera ready</span>
+              </div>
+            )}
+
+            {error && (
+              <p className="text-[12px] font-semibold text-red-400 mb-3">{error}</p>
+            )}
+
+            {/* ── ACTION BUTTONS (inside card) ── */}
+            {!isProcessing && (
+              <div className="grid grid-cols-2 gap-2.5 w-full">
+                {/* Take photo → opens camera */}
+                <button
+                  onClick={startCameraPipeline}
+                  disabled={isProcessing}
+                  className="civic-btn h-[52px] rounded-[14px] flex items-center justify-center gap-2 disabled:opacity-40"
+                  style={{ background: "#1c2330", border: "1.5px solid #B6C2D2" }}
+                >
+                  <CameraIcon size={17} color="#B6C2D2" strokeWidth={2} />
+                  <span className="text-[14px] font-bold" style={{ color: "#B6C2D2" }}>Take photo</span>
+                </button>
+
+                {/* Choose photo → gallery */}
+                <button
+                  onClick={() => { triggerHaptic(30); fileInputRef.current?.click(); }}
+                  disabled={isProcessing}
+                  className="civic-btn h-[52px] rounded-[14px] flex items-center justify-center gap-2 disabled:opacity-40"
+                  style={{ background: "#1c2330", border: "1.5px solid rgba(182,194,210,0.35)" }}
+                >
+                  <ImageIcon size={17} color="rgba(182,194,210,0.7)" strokeWidth={2} />
+                  <span className="text-[14px] font-medium" style={{ color: "rgba(182,194,210,0.7)" }}>Choose photo</span>
+                </button>
+              </div>
+            )}
+          </div>
         )}
 
-        {/* CAMERA FEED & PROCESSING UI */}
-        <div className={`relative w-full ${stream ? 'h-[60vh]' : 'h-[180px]'} bg-[#E2E8F0] dark:bg-[#09090B] rounded-[24px] overflow-hidden flex flex-col items-center justify-center shadow-inner dark:shadow-md transition-all duration-300 border dark:border-[#27272A]`}>
-          
-          {stream ? (
-            <>
-              <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover" />
-              
-              {/* Camera Overlays */}
-              <div className="absolute inset-0 z-10 p-8 flex flex-col justify-between pointer-events-none">
-                <div className="flex justify-between w-full h-10">
-                  <div className="w-8 h-8 border-t-[3px] border-l-[3px] border-white/80 shadow-sm"></div>
-                  <div className="w-8 h-8 border-t-[3px] border-r-[3px] border-white/80 shadow-sm"></div>
-                </div>
-                
-                {isRecording && (
-                  <div className="absolute top-6 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-md text-white font-bold px-4 py-1.5 rounded-full flex items-center gap-2 text-sm z-20">
-                    <div className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></div> Recording
-                  </div>
-                )}
+        {/* hidden utility elements */}
+        <canvas ref={canvasRef} className="hidden" />
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleGalleryUpload}
+          accept="image/*,video/*"
+          capture="environment"
+          className="hidden"
+        />
 
-                <div className="flex justify-between w-full h-10">
-                  <div className="w-8 h-8 border-b-[3px] border-l-[3px] border-white/80 shadow-sm"></div>
-                  <div className="w-8 h-8 border-b-[3px] border-r-[3px] border-white/80 shadow-sm"></div>
-                </div>
-              </div>
-              
-              {!isProcessing && (
-                <button onClick={stopCameraPipeline} className="absolute top-4 right-4 w-10 h-10 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center text-white z-20 active:scale-90">
-                  <X size={20} />
-                </button>
-              )}
-            </>
-          ) : (
-            <div className="flex flex-col items-center justify-center w-full h-full relative p-8">
-              <div className="flex flex-col items-center gap-2 relative z-10">
-                <Target size={32} className="text-[#516B8B] dark:text-[#A1A1AA] mb-2" />
-                <span className="text-[14px] font-bold text-[#516B8B] dark:text-[#A1A1AA] tracking-wide">
-                  {isProcessing ? pipelineStatus : "Camera Ready"}
-                </span>
-                {error && <span className="text-[12px] text-red-500 font-bold">{error}</span>}
-              </div>
-            </div>
-          )}
-          
-          {/* Hidden utility elements */}
-          <canvas ref={canvasRef} className="hidden" />
-          <input type="file" ref={fileInputRef} onChange={handleGalleryUpload} accept="image/*,video/*" capture="environment" className="hidden" />
-          
-          {/* Loading Overlay */}
-          {isProcessing && (
-            <div className="absolute inset-0 bg-black/50 backdrop-blur-sm z-50 flex flex-col items-center justify-center">
-               <div className="w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin mb-3"></div>
-               <span className="text-white font-bold">{pipelineStatus}</span>
-            </div>
-          )}
-        </div>
-
-        {/* CONTROLS */}
-        <div className="flex items-center gap-3 w-full">
-          {!stream ? (
-            <button 
-              onClick={startCameraPipeline}
-              disabled={isProcessing}
-              className="flex-1 h-[60px] bg-[#516B8B] dark:bg-[#27272A] text-white rounded-[20px] font-black text-[18px] flex items-center justify-center gap-2 shadow-[0_8px_24px_rgba(81,107,139,0.3)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.5)] active:scale-[0.98] transition-transform disabled:opacity-50"
-            >
-              <CameraIcon size={22} strokeWidth={2.5} /> Open Scanner
-            </button>
-          ) : (
-            <div className="flex-1 flex gap-3">
-              {/* Photo Button */}
-              <button 
-                onClick={captureImage}
-                disabled={isRecording || isProcessing}
-                className="flex-1 h-[60px] bg-white dark:bg-[#27272A] text-[#1E293B] dark:text-white border-2 border-[#E2E8F0] dark:border-[#3F3F46] rounded-[20px] font-bold text-[16px] flex items-center justify-center gap-2 active:scale-95 transition-transform disabled:opacity-50"
-              >
-                <CameraIcon size={20} /> Photo
-              </button>
-              
-              {/* Video Button */}
-              {isRecording ? (
-                <button 
-                  onClick={stopRecording}
-                  className="flex-1 h-[60px] bg-[#EF4444] text-white rounded-[20px] font-bold text-[16px] flex items-center justify-center gap-2 active:scale-95 transition-transform animate-pulse-ring"
-                >
-                  <Square size={20} fill="currentColor" /> Stop
-                </button>
-              ) : (
-                <button 
-                  onClick={startRecording}
-                  disabled={isProcessing}
-                  className="flex-1 h-[60px] bg-[#1E293B] text-white rounded-[20px] font-bold text-[16px] flex items-center justify-center gap-2 active:scale-95 transition-transform disabled:opacity-50"
-                >
-                  <Video size={20} /> Video
-                </button>
-              )}
-            </div>
-          )}
-
-          {!stream && (
-            <button 
-              onClick={() => { triggerHaptic(30); fileInputRef.current?.click(); }}
-              disabled={isProcessing}
-              className="w-[60px] h-[60px] shrink-0 bg-[#E2E8F0] dark:bg-[#27272A] text-[#516B8B] dark:text-[#E5E7EB] rounded-[20px] flex items-center justify-center transition-colors active:scale-95 disabled:opacity-50"
-            >
-              <ImageIcon size={24} />
-            </button>
-          )}
-        </div>
-
+        {/* Loading overlay */}
+        {isProcessing && (
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm z-50 flex flex-col items-center justify-center gap-3">
+            <div className="w-10 h-10 border-4 rounded-full animate-spin" style={{ borderColor: "rgba(182,194,210,0.25)", borderTopColor: "#B6C2D2" }} />
+            <span className="text-[14px] font-semibold" style={{ color: "#B6C2D2" }}>{pipelineStatus}</span>
+          </div>
+        )}
       </div>
+
+      {/* ── IN-CAMERA CONTROLS (photo + video) — shown only when stream is active ── */}
+      {stream && !isProcessing && (
+        <div className="flex gap-3 w-full">
+          {/* Photo capture */}
+          <button
+            onClick={captureImage}
+            disabled={isRecording || isProcessing}
+            className="civic-btn flex-1 h-[60px] rounded-[18px] flex items-center justify-center gap-2 font-bold text-[16px] disabled:opacity-40"
+            style={{ background: "#1c2330", border: "1.5px solid #B6C2D2", color: "#B6C2D2" }}
+          >
+            <CameraIcon size={20} strokeWidth={2} />
+            Photo
+          </button>
+
+          {/* Video record / stop */}
+          {isRecording ? (
+            <button
+              onClick={stopRecording}
+              className="civic-btn flex-1 h-[60px] rounded-[18px] flex items-center justify-center gap-2 font-bold text-[16px] text-white animate-pulse-ring"
+              style={{ background: "#EF4444" }}
+            >
+              <Square size={18} fill="currentColor" />
+              Stop
+            </button>
+          ) : (
+            <button
+              onClick={startRecording}
+              disabled={isProcessing}
+              className="civic-btn flex-1 h-[60px] rounded-[18px] flex items-center justify-center gap-2 font-bold text-[16px] disabled:opacity-40"
+              style={{ background: "#1c2330", border: "1.5px solid rgba(182,194,210,0.35)", color: "rgba(182,194,210,0.75)" }}
+            >
+              <Video size={18} strokeWidth={2} />
+              Video
+            </button>
+          )}
+        </div>
+      )}
     </main>
   );
 }
