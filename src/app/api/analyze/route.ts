@@ -15,6 +15,50 @@ const RATE_LIMIT_WINDOW_MS = 60_000;
 const MAX_REQS_PER_WINDOW = 10;
 const rateLimitMap = new Map<string, { count: number; timestamp: number }>();
 
+// ─── CIVIC CATEGORY TAXONOMY ────────────────────────────────────────────────
+// Single source of truth for issue_category. Used both as the Vision AI's
+// response schema enum (forces a consistent, predictable slug instead of a
+// free-form string) and to generate the human-readable list injected into
+// the prompt, so the two can never drift out of sync.
+//
+// IMPORTANT: "pothole" and "garbage" are kept exactly as-is because existing
+// authority_map.json entries (Shimla/Solan pothole, Mumbai garbage, Punjab
+// pothole, per the original dataset) key off these exact strings via an
+// EXACT, case-sensitive match in resolveAuthority(). Renaming them would
+// silently break those existing local-officer matches.
+//
+// The new categories below (traffic_signal, public_toilet, tree_park,
+// stray_animal, encroachment, noise_pollution, air_pollution, etc.) have no
+// district/city/state entries in authority_map.json yet. That's fine —
+// resolveAuthority()'s tier logic already falls through cleanly to the
+// CPGRAMS national fallback (tier 4) for any category with no specific
+// match, so these route correctly today and will automatically start using
+// real local contacts the moment matching entries are added to
+// authority_map.json — no code change needed here when that happens.
+const CIVIC_CATEGORIES: { slug: string; desc: string }[] = [
+  { slug: "pothole", desc: "damaged/broken road surface, potholes, severely cracked pavement" },
+  { slug: "road_damage", desc: "other road-surface failures (collapsed road edge, broken divider, missing manhole cover) distinct from a simple pothole" },
+  { slug: "garbage", desc: "overflowing public bins, illegal dumping, uncollected solid waste in a public space" },
+  { slug: "drainage", desc: "blocked/broken stormwater drains, open drains, waterlogging caused by blocked drainage" },
+  { slug: "sewage", desc: "sewage overflow or leakage, broken public sewer lines" },
+  { slug: "water_supply", desc: "broken/leaking public water pipelines or public taps" },
+  { slug: "streetlight", desc: "non-functional or damaged public street lighting" },
+  { slug: "electricity", desc: "exposed wiring, damaged public electricity poles/transformers" },
+  { slug: "traffic_signal", desc: "broken/malfunctioning traffic lights or damaged road signage" },
+  { slug: "public_toilet", desc: "damaged or unhygienic public toilet facility" },
+  { slug: "tree_park", desc: "fallen/hazardous trees or damaged public park infrastructure" },
+  { slug: "encroachment", desc: "illegal encroachment onto public land, footpaths, or roads" },
+  { slug: "illegal_construction", desc: "unauthorized construction encroaching on public space" },
+  { slug: "stray_animal", desc: "a clear public-safety hazard involving a stray or dead animal in a public space (e.g. a carcass blocking a road) — not a casual sighting of an animal" },
+  { slug: "air_pollution", desc: "visible smoke, open burning of waste, or dust hazard in a public space" },
+  { slug: "water_pollution", desc: "visible contamination of, or dumping into, a public water body" },
+  { slug: "noise_pollution", desc: "ONLY assign this if the image shows clear supporting context (e.g. a loudspeaker, generator, construction equipment) AND the citizen's description specifically describes a noise issue — never assign it from description text alone with no visual corroboration" },
+  { slug: "other_civic_issue", desc: "any other genuine, clearly visible, outdoor, public-domain civic hazard that falls under a government department's responsibility but doesn't fit the categories above" },
+];
+
+const CIVIC_CATEGORY_ENUM = CIVIC_CATEGORIES.map((c) => c.slug);
+const CIVIC_CATEGORY_PROMPT_LIST = CIVIC_CATEGORIES.map((c) => `- ${c.slug}: ${c.desc}`).join("\n");
+
 async function reverseGeocode(lat: number, lng: number): Promise<{ addressName: string; district: string; state: string; city: string }> {
   try {
     const response = await fetch(
@@ -52,12 +96,17 @@ async function reverseGeocode(lat: number, lng: number): Promise<{ addressName: 
 //   3. State + category match (e.g. Punjab + pothole) — verified state HQ
 //      contact when no city/district entry exists.
 //   4. National CPGRAMS fallback — always exists, always real, works for
-//      any department/state in India.
+//      any department/state/category in India, including every new
+//      category in CIVIC_CATEGORIES above that doesn't have a specific
+//      entry in authority_map.json yet.
 //
 // IMPORTANT: this function never fabricates a contact. If hasEmail/hasPhone
 // aren't explicitly true on a fallback-tier entry, the UI must not render
 // a button for that channel — see authority_contact.hasEmail/hasPhone in
 // the response, which the dashboard reads directly.
+//
+// Unchanged from the original implementation — left exactly as-is so
+// existing district/city/state matches keep working without risk.
 function resolveAuthority(category: string, district: string, state: string, city: string) {
   const entries = authorityMap as any[];
 
@@ -140,18 +189,18 @@ export async function POST(request: Request) {
         properties: {
           is_genuine_civic_issue: { type: "boolean" },
           rejection_reason: { type: "string" },
-          // FIX (cross-check it's actually a government-jurisdiction issue):
-          // previously the schema had no field distinguishing "this is a
-          // real hazard" from "this is a real hazard AND it's something a
-          // government department is actually responsible for" (vs e.g.
-          // private property damage, a civil dispute, or something outside
-          // any civic department's mandate). Adding this as its own
-          // checked field, with required reasoning, so the AI has to
-          // justify the jurisdiction call rather than just inferring it
-          // silently from issue_category.
+          // Cross-check it's actually a government-jurisdiction issue,
+          // separate from "is this a real hazard at all" — distinguishes
+          // a real hazard from a real hazard that's also something a
+          // government department is actually responsible for (vs e.g.
+          // private property damage, a civil dispute, or something
+          // outside any civic department's mandate).
           is_government_jurisdiction: { type: "boolean" },
           jurisdiction_reasoning: { type: "string" },
-          issue_category: { type: "string" },
+          // Constrained to a known taxonomy (see CIVIC_CATEGORIES) so the
+          // category string reliably matches authority_map.json entries
+          // and covers far more than roads/garbage.
+          issue_category: { type: "string", enum: CIVIC_CATEGORY_ENUM },
           sub_type: { type: "string" },
           severity: { type: "integer" },
           confidence: { type: "number" },
@@ -160,28 +209,38 @@ export async function POST(request: Request) {
           evidence_description: { type: "string" },
           urgency_flag: { type: "string" },
           estimated_affected_radius_meters: { type: "integer" },
+          // Anti-misuse: whether the citizen's written description (if any)
+          // is actually consistent with what's visible in the image. Lets
+          // the server hard-block mismatched/gamed submissions before they
+          // ever reach the (separate, token-costing) drafting call.
+          is_context_aligned: { type: "boolean" },
+          context_alignment_reasoning: { type: "string" },
         },
         required: [
           "is_genuine_civic_issue", "rejection_reason", "is_government_jurisdiction",
           "jurisdiction_reasoning", "issue_category", "sub_type", "severity",
           "confidence", "department", "complaint_title", "evidence_description",
-          "urgency_flag", "estimated_affected_radius_meters"
+          "urgency_flag", "estimated_affected_radius_meters",
+          "is_context_aligned", "context_alignment_reasoning"
         ],
       },
     };
 
     const userContext = description?.trim()
-      ? `\n\nThe citizen who captured this also provided this description in their own words: "${description.trim()}". Use it as supporting context for severity/category, but the image evidence is still the primary source of truth — do not let the description override what the image actually shows.`
+      ? `\n\nThe citizen who captured this also provided this description in their own words: "${description.trim()}". Cross-check it against the image per the CONTEXT-MATCH CHECK rule below. Where the image and description are consistent, use the description as supporting context to help pick the right category/sub_type/severity — but the image evidence remains the primary source of truth for whether a genuine hazard exists; the description can never promote a non-civic or private-property image into a genuine public civic issue.`
       : "";
 
-    const strictPrompt = `You are a highly analytical, strict Civic Infrastructure Hazard Assessor for India.
+    const strictPrompt = `You are a highly analytical, strict Civic Infrastructure Hazard Assessor for India, covering the full range of municipal and government civic services — not just roads and garbage.
 
 CRITICAL RULES:
 1. FILTER NON-CIVIC: Explicitly scan for human faces, selfies, pets, indoor residential rooms, or screens. If ANY are the primary subject, set "is_genuine_civic_issue" to false and state "Image rejected: Non-civic subject" in rejection_reason.
 2. FILTER ILLUSIONS: Do not classify shadows, wet patches, textured tiles, or prints as hazards.
-3. STRICT DEFINITION: A genuine hazard must be a clear outdoor public infrastructure failure (e.g., severe potholes, collapsed structures, exposed wiring, illegal dumping).
-4. JURISDICTION CHECK: Separately assess whether this is something a government civic department is actually responsible for (public roads, public utilities, public sanitation, public land) versus something outside government jurisdiction (private property, a civil/neighbor dispute, something on private land not affecting public safety). Set "is_government_jurisdiction" accordingly and explain your reasoning in "jurisdiction_reasoning" — be specific about which public body would plausibly own this responsibility.
-5. ZERO HALLUCINATION: If ambiguous, dark, or blurry, set "is_genuine_civic_issue" to false.${userContext}
+3. STRICT DEFINITION: A genuine civic issue must be a clearly visible, outdoor, public-domain problem that falls under a government department's responsibility. This includes infrastructure failures (e.g. potholes, broken drains, damaged streetlights) as well as other public-domain civic conditions (e.g. illegal encroachment, public sanitation hazards, visible environmental hazards, dangerous public-safety conditions in a public space). It does NOT include private property issues, indoor issues, or anything not visibly tied to a public space.
+4. CATEGORY TAXONOMY: Classify "issue_category" as exactly one of the following slugs (use "other_civic_issue" only if none of the specific ones genuinely fit):
+${CIVIC_CATEGORY_PROMPT_LIST}
+5. JURISDICTION CHECK: Separately assess whether this is something a government civic department is actually responsible for (public roads, public utilities, public sanitation, public land) versus something outside government jurisdiction (private property, a civil/neighbor dispute, something on private land not affecting public safety). Set "is_government_jurisdiction" accordingly and explain your reasoning in "jurisdiction_reasoning" — be specific about which public body would plausibly own this responsibility.
+6. CONTEXT-MATCH CHECK (anti-misuse): If the citizen provided a written description, check whether it plausibly describes what's actually visible in the image. If the description is about something unrelated to the image (random/unrelated text, a different subject entirely, or an attempt to game the categorizer with text alone while the photo shows nothing relevant), set "is_genuine_civic_issue" to false, use rejection_reason "Image and description don't appear to match — please retake a clear photo of the actual issue you want to report.", set "is_context_aligned" to false, and explain why in "context_alignment_reasoning". If no description was provided, or it's clearly consistent with the image, set "is_context_aligned" to true (use "No description provided" in context_alignment_reasoning if there wasn't one).
+7. ZERO HALLUCINATION: If ambiguous, dark, or blurry, set "is_genuine_civic_issue" to false and use rejection_reason "Image unclear — please click a clearer picture of the issue.".${userContext}
 
 Analyze this image and map it strictly to the provided JSON schema based on these rules.`;
 
@@ -215,6 +274,18 @@ Analyze this image and map it strictly to the provided JSON schema based on thes
 
     if (visionData.is_genuine_civic_issue === false) {
       return NextResponse.json({ success: false, error: visionData.rejection_reason || "Image rejected by Civic Guardrails." }, { status: 400 });
+    }
+
+    // Belt-and-suspenders anti-misuse check: even on the rare chance the
+    // model marks a submission as a "genuine" issue but still flags the
+    // description as unrelated to the image, hard-block it here rather
+    // than spending a second (drafting) Gemini call on a mismatched
+    // submission. This is the main token-misuse guard the user asked for.
+    if (description?.trim() && visionData.is_context_aligned === false) {
+      return NextResponse.json({
+        success: false,
+        error: visionData.context_alignment_reasoning || "The description doesn't match what's visible in the photo. Please retake a clear picture of the actual issue."
+      }, { status: 400 });
     }
 
     // Soft warning (not a hard block) if the AI thinks this may be outside
@@ -311,4 +382,4 @@ Keep the tone firm, respectful, and unambiguous — this should read as somethin
     const statusCode = error.message?.includes("timed out") ? 504 : 500;
     return NextResponse.json({ success: false, error: error.message || "Internal Server Error" }, { status: statusCode });
   }
-}
+}  
