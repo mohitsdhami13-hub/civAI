@@ -361,7 +361,8 @@ export default function Home() {
 
       const aiSource = capturedItems.find((i) => i.base64ForAI);
       if (aiSource) {
-        runBackgroundAI(aiSource.base64ForAI, pendingRef.id, description.trim());
+        const mediaUrls = uploadedMedia.map((m) => m.url);
+        runBackgroundAI(aiSource.base64ForAI, pendingRef.id, description.trim(), mediaUrls);
       } else {
         updateDoc(doc(db, "pending_reports", pendingRef.id), {
           status: "failed",
@@ -385,7 +386,12 @@ export default function Home() {
   };
 
   // --- BACKGROUND AI RUNNER ---
-  const runBackgroundAI = (base64Img: string, docId: string, userDescription: string) => {
+  const runBackgroundAI = (
+    base64Img: string,
+    docId: string,
+    userDescription: string,
+    mediaUrls: string[] = []
+  ) => {
     const cleanBase64 = base64Img.includes(",")
       ? base64Img.split(",")[1]
       : base64Img;
@@ -399,6 +405,7 @@ export default function Home() {
         lat: coords?.lat ?? 30.9045,
         lng: coords?.lng ?? 77.0967,
         description: userDescription,
+        mediaUrls,
       }),
       cache: "no-store",
     })
