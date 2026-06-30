@@ -452,8 +452,9 @@ export default function Home() {
   // ──────────────────────────────────────────────────────────────────────────
 
   return (
-    <main className="w-full flex flex-col gap-4 px-5 pt-5 pb-6 bg-[#F7F5F0] dark:bg-[#161616]">
-      <style dangerouslySetInnerHTML={{ __html: `
+    <main className="w-full flex flex-col gap-4 px-5 pt-5 pb-6 bg-[#F7F5F0] dark:bg-[#161616] min-h-[calc(100dvh-80px)]">
+      <style dangerouslySetInnerHTML={{
+        __html: `
         @keyframes scan { 0%,100%{transform:translateY(0)} 50%{transform:translateY(160px)} }
         .animate-scan { animation: scan 2.5s cubic-bezier(0.4,0,0.2,1) infinite; }
         @keyframes pulse-ring { 0%{box-shadow:0 0 0 0 rgba(239,68,68,0.7)} 70%{box-shadow:0 0 0 15px rgba(239,68,68,0)} 100%{box-shadow:0 0 0 0 rgba(239,68,68,0)} }
@@ -497,10 +498,10 @@ export default function Home() {
               <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
                 <path d="M11 4v3M11 15v3M4 11h3M15 11h3"
                   stroke="#516B8B" className="dark:stroke-[#B6C2D2]"
-                  strokeWidth="1.8" strokeLinecap="round"/>
+                  strokeWidth="1.8" strokeLinecap="round" />
                 <circle cx="11" cy="11" r="3"
                   stroke="#516B8B" className="dark:stroke-[#B6C2D2]"
-                  strokeWidth="1.8"/>
+                  strokeWidth="1.8" />
               </svg>
             </div>
           </div>
@@ -543,9 +544,8 @@ export default function Home() {
 
       {/* ── SCANNER / CAMERA ZONE ── */}
       <div
-        className={`relative w-full ${
-          stream ? "h-[60vh]" : "min-h-[200px]"
-        } rounded-[20px] overflow-hidden flex flex-col items-center justify-center transition-all duration-300 bg-white dark:bg-[#1e1e1e]`}
+        className={`relative w-full ${stream ? "h-[60vh]" : "min-h-[200px]"
+          } rounded-[20px] overflow-hidden flex flex-col items-center justify-center transition-all duration-300 bg-white dark:bg-[#1e1e1e]`}
       >
         {stream ? (
           <>
@@ -554,9 +554,8 @@ export default function Home() {
               autoPlay
               playsInline
               muted
-              className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-200 ${
-                videoReady ? "opacity-100" : "opacity-0"
-              }`}
+              className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-200 ${videoReady ? "opacity-100" : "opacity-0"
+                }`}
             />
 
             {!videoReady && (
@@ -609,14 +608,14 @@ export default function Home() {
                 <div className="w-[50px] h-[50px] rounded-full flex items-center justify-center bg-[#EEF1F6] dark:bg-[#1c2330] border border-[#516B8B] dark:border-[#B6C2D2]">
                   <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
                     <rect x="3" y="3" width="7" height="7" rx="1.5"
-                      stroke="#516B8B" className="dark:stroke-[#B6C2D2]" strokeWidth="1.6"/>
+                      stroke="#516B8B" className="dark:stroke-[#B6C2D2]" strokeWidth="1.6" />
                     <rect x="12" y="3" width="7" height="7" rx="1.5"
-                      stroke="#516B8B" className="dark:stroke-[#B6C2D2]" strokeWidth="1.6"/>
+                      stroke="#516B8B" className="dark:stroke-[#B6C2D2]" strokeWidth="1.6" />
                     <rect x="3" y="12" width="7" height="7" rx="1.5"
-                      stroke="#516B8B" className="dark:stroke-[#B6C2D2]" strokeWidth="1.6"/>
+                      stroke="#516B8B" className="dark:stroke-[#B6C2D2]" strokeWidth="1.6" />
                     <path d="M12 15.5h7M15.5 12v7"
                       stroke="#516B8B" className="dark:stroke-[#B6C2D2]"
-                      strokeWidth="1.6" strokeLinecap="round"/>
+                      strokeWidth="1.6" strokeLinecap="round" />
                   </svg>
                 </div>
               </div>
