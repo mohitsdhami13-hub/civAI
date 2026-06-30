@@ -6,7 +6,7 @@ import { db } from "../../lib/firebase";
 import { 
   Car, Droplet, Lightbulb, AlertTriangle, Trophy, Loader2, 
   Phone, Mail, Send, CheckCircle, FileText, ChevronDown, ChevronUp, Trash2,
-  Inbox, History, Share2, ExternalLink, Link as LinkIcon, ShieldAlert
+  Inbox, History, Share2, ExternalLink, Link as LinkIcon, ShieldAlert, Copy, Check
 } from "lucide-react";
 import Link from "next/link";
 
@@ -26,6 +26,9 @@ export default function DashboardPage() {
   const [expandedDraftId, setExpandedDraftId] = useState<string | null>(null);
   const [isSubmittingId, setIsSubmittingId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  // Tracks which draft's "Copy" button should show the brief checkmark
+  // confirmation, so each card's button state is independent.
+  const [copiedDraftId, setCopiedDraftId] = useState<string | null>(null);
 
   const currentUserId = "user_solan_resident_01";
 
@@ -134,7 +137,30 @@ export default function DashboardPage() {
     }
   };
 
-  // --- AUTOMATED EMAIL GENERATOR ---
+  // --- COPY COMPLAINT TEXT ---
+  // FIX: when no verified email exists for a location (most fallback-tier
+  // and all national-fallback cases), the user still needs a way to get
+  // the formal complaint text into a government portal's text box — those
+  // portals (CPGRAMS, state PWD sites, etc.) require pasting into a web
+  // form, not an email. This makes the generated text available to copy
+  // unconditionally, independent of which contact channels exist.
+  const copyComplaintText = async (draft: any, e: React.MouseEvent) => {
+    e.stopPropagation();
+    triggerHaptic(30);
+
+    const text = draft.agentResult?.formal_complaint || "";
+    if (!text) return;
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedDraftId(draft.id);
+      setTimeout(() => setCopiedDraftId((current) => (current === draft.id ? null : current)), 2000);
+    } catch {
+      triggerToast("Couldn't copy — try selecting the text manually");
+    }
+  };
+
+
   // FIX: only ever called when authority_contact.hasEmail is true (gated in
   // the JSX below) — this function no longer assumes an email exists.
   const generateMailtoLink = (draft: any) => {
@@ -403,9 +429,39 @@ export default function DashboardPage() {
                           </div>
 
                           <div className="flex flex-col gap-1.5">
-                            <span className="text-[11px] font-bold text-[#6B7280] dark:text-[#A1A1AA] uppercase tracking-wider flex items-center gap-1">
-                              <FileText size={12} /> Generated Formal Complaint
-                            </span>
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] font-bold text-[#6B7280] dark:text-[#A1A1AA] uppercase tracking-wider flex items-center gap-1">
+                                <FileText size={12} /> Generated Formal Complaint
+                              </span>
+                              {/*
+                                FIX (copy button for when email isn't an
+                                option): some authorities only expose a
+                                phone helpline or a web portal (e.g. BMC,
+                                BBMP, CPGRAMS) with no email at all — this
+                                button works regardless, so the user can
+                                always grab the formal text and paste it
+                                straight into whatever portal/form they end
+                                up on. Independent per-card copied state so
+                                tapping one card's button doesn't show a
+                                false confirmation on another.
+                              */}
+                              <button
+                                onClick={(e) => copyComplaintText(draft, e)}
+                                className="flex items-center gap-1 text-[11px] font-bold text-[#516B8B] dark:text-[#A1A1AA] px-2 py-1 rounded-lg hover:bg-[#F3F4F6] dark:hover:bg-[#27272A] active:scale-95 transition-all"
+                              >
+                                {copiedDraftId === draft.id ? (
+                                  <>
+                                    <Check size={12} className="text-[#10B981]" />
+                                    <span className="text-[#10B981]">Copied</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy size={12} />
+                                    Copy text
+                                  </>
+                                )}
+                              </button>
+                            </div>
                             <div className="bg-[#FCFAF5] dark:bg-[#09090B] p-3 rounded-xl text-[12px] text-[#6B7280] dark:text-[#A1A1AA] font-serif leading-relaxed max-h-[120px] overflow-y-auto border border-[#E2E8F0] dark:border-[#27272A] whitespace-pre-wrap">
                               {draft.agentResult?.formal_complaint}
                             </div>
@@ -473,8 +529,24 @@ export default function DashboardPage() {
                               <Icon size={24} className={catConfig.color} strokeWidth={2.5} />
                             </div>
                             
-                            <div className="flex-1 pt-1">
-                              <div className="flex justify-between items-start mb-1">
+                            {/*
+                              FIX (share button overlapping status text):
+                              The share button used to be `absolute top-3
+                              right-3`, floating completely outside this
+                              flex layout — so it landed directly on top of
+                              the status pill ("IN PROGRE...") which the
+                              flex engine had no awareness needed to make
+                              room for it, clipping the text as shown in
+                              the screenshot. It's now a real flex sibling
+                              inside the header row (pr-7 added below
+                              reserves space; gap-1.5 sets the spacing), so
+                              the status pill and share button each get
+                              their own slot and never overlap regardless
+                              of label length ("Pending Review" vs
+                              "Resolved" etc).
+                            */}
+                            <div className="flex-1 pt-1 min-w-0 pr-7">
+                              <div className="flex justify-between items-start mb-1 gap-1.5">
                                 <h3 className="font-bold text-[16px] text-[#1E293B] dark:text-[#E5E7EB] capitalize leading-tight pr-2 line-clamp-1">
                                   {complaint.analysis?.subType || complaint.analysis?.category || "Civic Issue"}
                                 </h3>
@@ -494,19 +566,19 @@ export default function DashboardPage() {
                           </div>
                         </Link>
 
-                        {/* FIX (share-by-link feature): lets anyone with the
-                            resulting link view this specific report and
-                            contribute their own evidence on the public
-                            /track/[id] page, without installing the app or
-                            creating an account. Positioned as a floating
-                            button so it doesn't interfere with the card's
-                            tap-to-track navigation above. */}
+                        {/*
+                          Share button now sits in the card's top-right
+                          corner padding zone only — pr-7 above guarantees
+                          the text content never extends underneath it, so
+                          this can stay visually "floating" without
+                          actually colliding with anything.
+                        */}
                         <button
                           onClick={(e) => shareReport(complaint, e)}
-                          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/90 dark:bg-[#27272A]/90 backdrop-blur-sm border border-[#E2E8F0] dark:border-[#3F3F46] flex items-center justify-center shadow-sm active:scale-90 transition-transform"
+                          className="absolute top-4 right-4 w-7 h-7 rounded-full bg-[#F8F9FC] dark:bg-[#27272A] flex items-center justify-center active:scale-90 transition-transform z-10"
                           aria-label="Share this report"
                         >
-                          <Share2 size={14} className="text-[#516B8B] dark:text-[#A1A1AA]" />
+                          <Share2 size={13} className="text-[#516B8B] dark:text-[#A1A1AA]" />
                         </button>
                       </div>
                     );
@@ -533,3 +605,4 @@ export default function DashboardPage() {
     </main>
   );
 }
+
