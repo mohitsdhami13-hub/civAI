@@ -3,7 +3,7 @@
 import { Award, Shield, Target, Zap, CheckCircle } from "lucide-react";
 
 export default function ProfilePage() {
-  // Mocked state for presentation
+  
   const xp = 850;
   const nextLevel = 1000;
   const progress = (xp / nextLevel) * 100;
@@ -18,10 +18,10 @@ export default function ProfilePage() {
   return (
     <main className="p-5 flex flex-col gap-6 w-full max-w-md mx-auto min-h-[calc(100vh-76px)] pb-24">
       
-      {/* GOOGLE IDENTITY & XP CARD */}
+      {}
       <div className="bg-white dark:bg-[#18181B] border border-[#E2E8F0] dark:border-transparent rounded-[24px] p-6 relative overflow-hidden shadow-sm mt-2">
         <div className="flex items-center gap-4 relative z-10">
-          {/* Avatar with Theme Ring */}
+          {}
           <div className="w-16 h-16 rounded-full overflow-hidden border-[3px] border-[#516B8B] dark:border-[#52525B] shadow-lg shadow-[#516B8B]/20 shrink-0 bg-[#E2E8F0] dark:bg-[#09090B]">
             <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Mohit&backgroundColor=E2E8F0" alt="Avatar" className="w-full h-full object-cover" />
           </div>
@@ -35,7 +35,7 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* XP PROGRESS BAR */}
+        {}
         <div className="mt-6 pt-5 border-t border-[#E2E8F0] dark:border-[#27272A]">
           <div className="flex justify-between text-[13px] font-bold mb-2">
             <span className="text-[#516B8B] dark:text-[#E5E7EB] flex items-center gap-1"><Award size={16}/> Level 4 Citizen</span>
@@ -47,9 +47,9 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* HERO IMPACT SCORE */}
+      {}
       <div className="bg-[#516B8B] dark:bg-[#27272A] rounded-[24px] p-5 text-white shadow-[0_10px_30px_rgba(81,107,139,0.3)] dark:shadow-none flex items-center justify-between relative overflow-hidden">
-        {/* Abstract Background Shapes */}
+        {}
         <div className="absolute -right-6 -top-6 w-24 h-24 bg-white/10 rounded-full blur-xl"></div>
         <div className="absolute right-10 -bottom-10 w-20 h-20 bg-[#FFD166]/20 rounded-full blur-xl"></div>
         
@@ -64,7 +64,7 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* STATS GRID */}
+      {}
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-white dark:bg-[#18181B] border border-[#E2E8F0] dark:border-transparent rounded-[20px] p-4 text-center shadow-sm">
           <Target size={24} className="text-[#516B8B] dark:text-[#E5E7EB] mx-auto mb-2" />
@@ -83,13 +83,13 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* HORIZONTAL BADGES */}
+      {}
       <div>
         <h2 className="text-[15px] font-black text-[#1E293B] dark:text-[#E5E7EB] mb-3 px-1" style={{fontFamily: 'var(--font-jakarta)'}}>Achievements</h2>
         <div 
           className="flex overflow-x-auto gap-3 pb-4 snap-x hide-scrollbar" 
           style={{ scrollbarWidth: 'none' }}
-          /* THE FIX: Stop the swipe from bubbling up to the page navigator */
+          
           onTouchStart={(e) => e.stopPropagation()}
           onTouchMove={(e) => e.stopPropagation()}
           onTouchEnd={(e) => e.stopPropagation()}

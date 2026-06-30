@@ -3,7 +3,6 @@
 import dynamic from "next/dynamic";
 import { Loader2 } from "lucide-react";
 
-// Dynamically import the map component and explicitly disable Server-Side Rendering (SSR)
 const CommunityMap = dynamic(() => import("../../components/CommunityMap"), {
   ssr: false,
   loading: () => (

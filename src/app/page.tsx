@@ -62,7 +62,6 @@ export default function Home() {
 
   const currentUserId = "user_solan_resident_01";
 
-  // --- LOCATION ---
   const requestLocation = () => {
     if (typeof window === "undefined" || !("geolocation" in navigator)) {
       setLocationState("unsupported");
@@ -94,7 +93,7 @@ export default function Home() {
             null;
           if (resolvedCity) setCityName(resolvedCity);
         } catch {
-          // Reverse geocoding failed — coords still saved, just no city label
+          
         }
       },
       () => {
@@ -106,15 +105,9 @@ export default function Home() {
 
   useEffect(() => {
     requestLocation();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    
   }, []);
 
-  // --- PROACTIVE PERMISSION CHECK ---
-  // FIX: previously this set cameraPermState directly from query results,
-  // and "prompt" (meaning "never asked yet, totally normal") was being
-  // treated the same as a real denial in some code paths. A fresh reset
-  // permission reports as "prompt", not "denied" — that state should NOT
-  // show any warning banner. Only an actual "denied" result should.
   useEffect(() => {
     if (typeof navigator === "undefined" || !("permissions" in navigator)) return;
 
@@ -128,8 +121,7 @@ export default function Home() {
           if (cameraStatus) setCameraPermState(cameraStatus.state);
         };
       } catch {
-        // Permissions API doesn't support 'camera' on this browser/version —
-        // fall back entirely to the reactive getUserMedia error path below.
+
       }
     })();
 
@@ -138,23 +130,6 @@ export default function Home() {
     };
   }, []);
 
-  // --- CAMERA PIPELINE ---
-  // FIX (camera never even prompting after a permission reset):
-  // The previous version requested { video: { facingMode: "environment" } }.
-  // On some Android/Chrome + device camera combinations, facingMode as a
-  // bare (non-"ideal") constraint is resolved as a HARD constraint during
-  // device enumeration — if the browser can't immediately confirm a back
-  // camera satisfies it, getUserMedia can throw OverconstrainedError before
-  // the permission dialog is ever shown. That perfectly explains "location
-  // prompted fine, camera never prompted at all" — the call was failing at
-  // the constraint-resolution step, before reaching the permission step.
-  //
-  // Fix: request with facingMode as "ideal" (a soft preference, never
-  // blocks on failure to match) on the first attempt. If that still throws,
-  // retry once with NO constraints at all (just { video: true }), which is
-  // the most universally compatible request and will reliably trigger the
-  // permission prompt on a fresh/reset permission state. Only if both
-  // attempts fail do we surface a real error.
   const startCameraPipeline = async () => {
     triggerHaptic(30);
     setError(null);
@@ -181,7 +156,7 @@ export default function Home() {
     };
 
     try {
-      // Attempt 1: prefer the back camera, but don't hard-require it.
+      
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: { ideal: "environment" } },
         audio: false,
@@ -191,16 +166,12 @@ export default function Home() {
     } catch (firstErr: any) {
       console.warn("Camera attempt 1 (ideal back camera) failed:", firstErr?.name, firstErr?.message);
 
-      // If the user explicitly denied permission, retrying won't help —
-      // surface that immediately rather than prompting twice.
       if (firstErr?.name === "NotAllowedError" || firstErr?.name === "SecurityError") {
         setCameraError("denied");
         setCameraPermState("denied");
         return;
       }
 
-      // Any other failure (most commonly OverconstrainedError from the
-      // facingMode constraint) — retry with the simplest possible request.
       try {
         const fallbackStream = await navigator.mediaDevices.getUserMedia({
           video: true,
@@ -230,7 +201,6 @@ export default function Home() {
     setVideoReady(false);
   };
 
-  // --- IMAGE CAPTURE ---
   const captureImage = () => {
     triggerHaptic(50);
     if (videoRef.current && canvasRef.current) {
@@ -247,7 +217,6 @@ export default function Home() {
     }
   };
 
-  // --- VIDEO CAPTURE ---
   const startRecording = () => {
     if (!stream) return;
     triggerHaptic(50);
@@ -282,7 +251,6 @@ export default function Home() {
     setIsRecording(false);
   };
 
-  // --- ADD CAPTURED ITEM TO QUEUE ---
   const addCapturedItem = (blob: Blob, mimeType: string, base64ForAI: string) => {
     const previewUrl = URL.createObjectURL(blob);
     const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -298,7 +266,6 @@ export default function Home() {
     });
   };
 
-  // --- GALLERY UPLOAD (multi-file) ---
   const handleGalleryUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -385,7 +352,6 @@ export default function Home() {
     }
   };
 
-  // --- BACKGROUND AI RUNNER ---
   const runBackgroundAI = (
     base64Img: string,
     docId: string,
@@ -449,15 +415,6 @@ export default function Home() {
     }
   })();
 
-  // ─── COLOUR TOKENS ────────────────────────────────────────────────────────
-  // Light:  page #F7F5F0 · card #FFFFFF · icon-pill #E8EBF0
-  //         text-primary #1E293B · text-muted #64748B
-  //         accent #516B8B · accent-tint #EEF1F6
-  // Dark:   page #161616 · card #1e1e1e · icon-pill #1c2330
-  //         text-primary #F0F0F0 · text-muted #555555
-  //         accent #B6C2D2 · accent-tint #1c2330
-  // ──────────────────────────────────────────────────────────────────────────
-
   return (
     <main className="w-full flex flex-col gap-4 px-5 pt-5 pb-6 bg-[#F7F5F0] dark:bg-[#161616] min-h-[calc(100dvh-80px)]">
       <style dangerouslySetInnerHTML={{
@@ -470,7 +427,7 @@ export default function Home() {
         .civic-btn:active { transform: scale(0.97); opacity: 0.85; }
       ` }} />
 
-      {/* ── HERO + STATS (hidden when camera active) ── */}
+      {}
       {!stream && (
         <>
           <div className="rounded-[20px] px-6 py-[22px] relative bg-white dark:bg-[#1e1e1e]">
@@ -549,7 +506,7 @@ export default function Home() {
         </>
       )}
 
-      {/* ── SCANNER / CAMERA ZONE ── */}
+      {}
       <div
         className={`relative w-full ${stream ? "h-[60vh]" : "min-h-[200px]"
           } rounded-[20px] overflow-hidden flex flex-col items-center justify-center transition-all duration-300 bg-white dark:bg-[#1e1e1e]`}
@@ -641,14 +598,7 @@ export default function Home() {
               </div>
             )}
 
-            {/*
-              FIX: only show this banner for an actual confirmed "denied"
-              state. "prompt" (never asked / freshly reset) must NOT trigger
-              this warning — that was incorrectly conflating "haven't asked
-              yet" with "user said no," which made a freshly reset
-              permission look broken before the user even got a chance to
-              tap the button.
-            */}
+            {}
             {cameraPermState === "denied" && !cameraError && (
               <div className="w-full mb-3 rounded-[12px] px-3.5 py-3 flex gap-2 bg-[#FFF7ED] dark:bg-[#2A1F12] border border-[#FDBA74]/50 dark:border-[#92400E]/50">
                 <AlertCircle size={15} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
@@ -737,7 +687,7 @@ export default function Home() {
         )}
       </div>
 
-      {/* ── IN-CAMERA CONTROLS ── */}
+      {}
       {stream && !isProcessing && (
         <div className="flex gap-3 w-full">
           <button
@@ -784,7 +734,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* ── CAPTURED MEDIA QUEUE + DESCRIPTION + SUBMIT ── */}
+      {}
       {!stream && capturedItems.length > 0 && (
         <div className="rounded-[20px] p-4 flex flex-col gap-3 bg-white dark:bg-[#1e1e1e]">
           <div className="flex gap-2.5 overflow-x-auto pb-1">

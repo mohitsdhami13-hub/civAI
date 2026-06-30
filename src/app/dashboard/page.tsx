@@ -26,8 +26,7 @@ export default function DashboardPage() {
   const [expandedDraftId, setExpandedDraftId] = useState<string | null>(null);
   const [isSubmittingId, setIsSubmittingId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  // Tracks which draft's "Copy" button should show the brief checkmark
-  // confirmation, so each card's button state is independent.
+
   const [copiedDraftId, setCopiedDraftId] = useState<string | null>(null);
 
   const currentUserId = "user_solan_resident_01";
@@ -81,14 +80,7 @@ export default function DashboardPage() {
     setIsSubmittingId(draft.id);
 
     const targetComplaintId = draft.agentResult?.complaint_id || `CIV-${Math.floor(100000 + Math.random() * 900000)}`;
-    
-    // FIX (share-by-link / multi-contributor support): previously only
-    // mediaUrl (a single file) was carried over to the filed complaint
-    // record, even though page.tsx's submit flow now uploads a `media`
-    // array. Carrying the full array forward means the public share page
-    // (/track/[id]) can show every photo/video a citizen attached, and
-    // any future "contribute more evidence" flow has something to append
-    // to instead of overwriting a single field.
+
     const payload = {
       complaintId: targetComplaintId,
       createdAt: new Date().toISOString(), 
@@ -137,13 +129,6 @@ export default function DashboardPage() {
     }
   };
 
-  // --- COPY COMPLAINT TEXT ---
-  // FIX: when no verified email exists for a location (most fallback-tier
-  // and all national-fallback cases), the user still needs a way to get
-  // the formal complaint text into a government portal's text box — those
-  // portals (CPGRAMS, state PWD sites, etc.) require pasting into a web
-  // form, not an email. This makes the generated text available to copy
-  // unconditionally, independent of which contact channels exist.
   const copyComplaintText = async (draft: any, e: React.MouseEvent) => {
     e.stopPropagation();
     triggerHaptic(30);
@@ -160,9 +145,6 @@ export default function DashboardPage() {
     }
   };
 
-
-  // FIX: only ever called when authority_contact.hasEmail is true (gated in
-  // the JSX below) — this function no longer assumes an email exists.
   const generateMailtoLink = (draft: any) => {
     const email = draft.agentResult?.authority_contact?.email || "";
     const department = draft.agentResult?.authority_contact?.department || "Civic Department";
@@ -170,11 +152,7 @@ export default function DashboardPage() {
     const location = draft.agentResult?.resolved_location_name?.split(',')[0] || "your area";
 
     const subject = draft.agentResult?.email_subject || `Urgent Civic Report: ${category} at ${location}`;
-    // FIX (formal + powerful + evidence-linked): body now prefers the AI's
-    // dedicated email_body (which was prompted to include location,
-    // severity, evidence links, and a firm call to action) over the older
-    // generic template, and always appends the media links explicitly
-    // since mailto: cannot carry real attachments.
+
     const mediaLinks = (draft.media || []).map((m: any, i: number) => `${i + 1}. ${m.url}`).join("\n");
     const bodyCore = draft.agentResult?.email_body ||
       `To the ${department},\n\nI am writing to formally report an issue regarding a ${category.toLowerCase()} located at ${location}.\n\nAI Assessment Details:\n${draft.agentResult?.formal_complaint || "Please review the logged civic infrastructure report."}\n\nTracking ID: ${draft.id}\n\nPlease look into this matter at your earliest convenience.\n\nSincerely,\nA Concerned Resident`;
@@ -185,12 +163,6 @@ export default function DashboardPage() {
     return `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   };
 
-  // --- SHARE-BY-LINK ---
-  // Lets anyone with the link view (and, on the public page, contribute
-  // evidence to) a filed complaint without installing the app or having an
-  // account — uses the public /track/[id] route, which must read from
-  // Firestore with rules that allow unauthenticated reads scoped to
-  // isPubliclyShareable: true documents (see note at bottom of file).
   const shareReport = async (complaint: any, e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
@@ -207,7 +179,7 @@ export default function DashboardPage() {
         await navigator.share({ title: "CivicAI Report", text: shareText, url: shareUrl });
         return;
       } catch {
-        // User cancelled the native share sheet — fall through to clipboard
+        
       }
     }
 
@@ -250,14 +222,14 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* HEADER */}
+      {}
       <div className="flex items-center justify-between mt-2 mb-5">
         <h1 className="text-[26px] font-black text-[#1E293B] dark:text-[#E5E7EB] leading-tight" style={{fontFamily: 'var(--font-jakarta)'}}>
           My Reports
         </h1>
       </div>
 
-      {/* SEGMENTED CONTROL TABS */}
+      {}
       <div className="w-full bg-[#E2E8F0] dark:bg-[#18181B] p-1 rounded-2xl flex items-center mb-6 shadow-inner">
         <button 
           onClick={() => { triggerHaptic(20); setActiveTab('queue'); }}
@@ -295,7 +267,7 @@ export default function DashboardPage() {
       ) : (
         <div className="flex flex-col gap-6 animate-in fade-in duration-300">
 
-          {/* TAB 1: ACTION QUEUE */}
+          {}
           {activeTab === 'queue' && (
             <div className="flex flex-col gap-3">
               {pendingReports.length === 0 ? (
@@ -321,10 +293,6 @@ export default function DashboardPage() {
                   
                   const Icon = catConfig.Icon;
 
-                  // Channel availability — read directly from what route.ts
-                  // resolved, never assumed. A fallback-tier authority may
-                  // have hasEmail:false / hasPhone:true (e.g. BMC, BBMP) or
-                  // neither (national CPGRAMS fallback, portal-only).
                   const authority = draft.agentResult?.authority_contact;
                   const hasEmail = !!authority?.hasEmail || !!authority?.email;
                   const hasPhone = !!authority?.hasPhone || !!authority?.phone;
@@ -332,12 +300,6 @@ export default function DashboardPage() {
                   const isNationalFallback = authority?.matchTier === "national";
                   const jurisdictionWarning = draft.agentResult?.jurisdiction_warning;
 
-                  // FIX (show the photo on draft cards too): same treatment
-                  // as filed history below — only applies once the draft is
-                  // "ready" (processing state keeps the spinning loader icon
-                  // since that's a meaningful status signal, not just
-                  // decorative). Falls back to category icon for video-only
-                  // drafts or anything missing a usable image preview.
                   const draftFirstMedia = draft.media?.[0];
                   const draftPreviewUrl = isReady
                     ? (draftFirstMedia && !draftFirstMedia.mimeType?.startsWith("video/") ? draftFirstMedia.url : null) ||
@@ -424,9 +386,7 @@ export default function DashboardPage() {
                             <h4 className="text-[15px] font-black text-[#1E293B] dark:text-[#E5E7EB] mt-0.5">
                               {authority?.department || draft.visionData?.department}
                             </h4>
-                            {/* FIX: be honest when this is a national fallback rather
-                                than a verified local officer — sets correct
-                                expectations instead of implying a named contact. */}
+                            {}
                             {isNationalFallback && (
                               <p className="text-[11px] text-[#9CA3AF] dark:text-[#71717A] mt-1">
                                 No verified local contact found for this location yet — routed to India's national grievance system, which forwards to the correct department automatically.
@@ -434,9 +394,7 @@ export default function DashboardPage() {
                             )}
                           </div>
 
-                          {/* FIX (cross-checked jurisdiction warning): shown only
-                              when the AI flagged this might not actually be a
-                              government department's responsibility. */}
+                          {}
                           {jurisdictionWarning && (
                             <div className="flex gap-2 bg-[#FFF7ED] dark:bg-[#2A1F12] border border-[#FDBA74]/50 dark:border-[#92400E]/50 rounded-xl px-3 py-2.5">
                               <ShieldAlert size={15} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
@@ -446,9 +404,7 @@ export default function DashboardPage() {
                             </div>
                           )}
 
-                          {/* Channel buttons — only ever render a button for a
-                              channel that genuinely exists. No fabricated
-                              email/phone ever shown. */}
+                          {}
                           <div className="grid grid-cols-2 gap-2">
                             {hasPhone && (
                               <a href={`tel:${authority.phone}`} className="flex items-center justify-center gap-2 bg-[#F8F9FC] dark:bg-[#09090B] border border-[#E2E8F0] dark:border-[#27272A] text-[#1E293B] dark:text-[#E5E7EB] rounded-xl py-2.5 text-xs font-bold active:scale-95 transition-transform">
@@ -472,18 +428,7 @@ export default function DashboardPage() {
                               <span className="text-[11px] font-bold text-[#6B7280] dark:text-[#A1A1AA] uppercase tracking-wider flex items-center gap-1">
                                 <FileText size={12} /> Generated Formal Complaint
                               </span>
-                              {/*
-                                FIX (copy button for when email isn't an
-                                option): some authorities only expose a
-                                phone helpline or a web portal (e.g. BMC,
-                                BBMP, CPGRAMS) with no email at all — this
-                                button works regardless, so the user can
-                                always grab the formal text and paste it
-                                straight into whatever portal/form they end
-                                up on. Independent per-card copied state so
-                                tapping one card's button doesn't show a
-                                false confirmation on another.
-                              */}
+                              {}
                               <button
                                 onClick={(e) => copyComplaintText(draft, e)}
                                 className="flex items-center gap-1 text-[11px] font-bold text-[#516B8B] dark:text-[#A1A1AA] px-2 py-1 rounded-lg hover:bg-[#F3F4F6] dark:hover:bg-[#27272A] active:scale-95 transition-all"
@@ -537,7 +482,7 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* TAB 2: FILED HISTORY */}
+          {}
           {activeTab === 'filed' && (
             <div className="flex flex-col gap-3">
               {complaints.length === 0 ? (
@@ -560,15 +505,6 @@ export default function DashboardPage() {
                     const Icon = catConfig.Icon;
                     const locationShort = complaint.location?.address?.split(',')[0] || "Unknown location";
 
-                    // FIX (show the actual photo in report history): the card
-                    // used to always render a generic category icon, even
-                    // though the original photo/video is sitting right in
-                    // Firestore via `media` (array, current schema) or the
-                    // older single `mediaUrl` field (pre-multi-capture
-                    // reports). Prefer the first image in `media`; fall back
-                    // to mediaUrl if it's an image; if all we have is a
-                    // video with no thumbnail, fall back to the category
-                    // icon rather than showing a broken/black video frame.
                     const firstMedia = complaint.media?.[0];
                     const previewUrl =
                       (firstMedia && !firstMedia.mimeType?.startsWith("video/") ? firstMedia.url : null) ||
@@ -597,8 +533,7 @@ export default function DashboardPage() {
                               ) : (
                                 <Icon size={24} className={catConfig.color} strokeWidth={2.5} />
                               )}
-                              {/* small category badge in the corner when showing a real photo,
-                                  so the category is still glanceable even with the thumbnail */}
+                              {}
                               {previewUrl && (
                                 <div className={`absolute bottom-0 right-0 w-5 h-5 rounded-tl-lg ${catConfig.bg} flex items-center justify-center`}>
                                   <Icon size={11} className={catConfig.color} strokeWidth={2.5} />
@@ -611,22 +546,7 @@ export default function DashboardPage() {
                               )}
                             </div>
                             
-                            {/*
-                              FIX (share button overlapping status text):
-                              The share button used to be `absolute top-3
-                              right-3`, floating completely outside this
-                              flex layout — so it landed directly on top of
-                              the status pill ("IN PROGRE...") which the
-                              flex engine had no awareness needed to make
-                              room for it, clipping the text as shown in
-                              the screenshot. It's now a real flex sibling
-                              inside the header row (pr-7 added below
-                              reserves space; gap-1.5 sets the spacing), so
-                              the status pill and share button each get
-                              their own slot and never overlap regardless
-                              of label length ("Pending Review" vs
-                              "Resolved" etc).
-                            */}
+                            {}
                             <div className="flex-1 pt-1 min-w-0 pr-7">
                               <div className="flex justify-between items-start mb-1 gap-1.5">
                                 <h3 className="font-bold text-[16px] text-[#1E293B] dark:text-[#E5E7EB] capitalize leading-tight pr-2 line-clamp-1">
@@ -648,13 +568,7 @@ export default function DashboardPage() {
                           </div>
                         </Link>
 
-                        {/*
-                          Share button now sits in the card's top-right
-                          corner padding zone only — pr-7 above guarantees
-                          the text content never extends underneath it, so
-                          this can stay visually "floating" without
-                          actually colliding with anything.
-                        */}
+                        {}
                         <button
                           onClick={(e) => shareReport(complaint, e)}
                           className="absolute top-4 right-4 w-7 h-7 rounded-full bg-[#F8F9FC] dark:bg-[#27272A] flex items-center justify-center active:scale-90 transition-transform z-10"
@@ -666,7 +580,7 @@ export default function DashboardPage() {
                     );
                   })}
                   
-                  {/* IMPACT METRIC SCORE */}
+                  {}
                   <div className="bg-[#F8F9FC] dark:bg-[#18181B] border border-[#E2E8F0] dark:border-transparent rounded-[24px] p-5 mt-2 flex items-center gap-4 shadow-sm">
                     <div className="w-12 h-12 bg-white dark:bg-[#09090B] rounded-full flex items-center justify-center shrink-0 shadow-sm">
                       <Trophy size={24} className="text-[#516B8B] dark:text-[#E5E7EB]" />

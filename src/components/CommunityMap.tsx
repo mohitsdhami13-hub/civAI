@@ -11,7 +11,6 @@ const mapContainerStyle = {
   height: "100%",
 };
 
-// Pure Stealth Dark Mode Style
 const stealthMapStyle = [
   { elementType: "geometry", stylers: [{ color: "#09090B" }] },
   { elementType: "labels.text.stroke", stylers: [{ color: "#18181B" }] },
@@ -28,7 +27,6 @@ const stealthMapStyle = [
   { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#516B8B" }] },
 ];
 
-// FIX: Replaced random generation with fixed radial offsets so CCTV locations stay permanently anchored
 const generateFixedLocalCCTV = (lat: number, lng: number) => {
   const fixedOffsets = [
     { lat: 0.005, lng: 0.005 },   { lat: -0.005, lng: 0.008 },
@@ -55,13 +53,11 @@ export default function CommunityMap() {
   const [hasUpvoted, setHasUpvoted] = useState(false);
   const [imgLoaded, setImgLoaded] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
-  
-  // Real Places Data
+
   const [policeStations, setPoliceStations] = useState<any[]>([]);
   const [hospitals, setHospitals] = useState<any[]>([]);
   const [mockCCTV, setMockCCTV] = useState<any[]>([]);
-  
-  // Unified state for InfoWindows (Police or Hospital)
+
   const [selectedFacility, setSelectedFacility] = useState<any>(null);
 
   const [isLayersMenuOpen, setIsLayersMenuOpen] = useState(false);
@@ -69,7 +65,6 @@ export default function CommunityMap() {
 
   const mapRef = useRef<google.maps.Map | null>(null);
 
-  // 1. Get GPS and Firebase Data
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -83,7 +78,7 @@ export default function CommunityMap() {
         { enableHighAccuracy: true }
       );
     } else {
-      // Fallback CCTV generation for default location
+      
       setMockCCTV(generateFixedLocalCCTV(mapCenter.lat, mapCenter.lng));
     }
 
@@ -99,11 +94,9 @@ export default function CommunityMap() {
     fetchActiveHazards();
   }, []);
 
-  // 2. Helper to fetch Places API Data
   const fetchPlacesData = (map: google.maps.Map, location: { lat: number, lng: number }) => {
     const service = new google.maps.places.PlacesService(map);
-    
-    // Fetch Police Stations
+
     service.nearbySearch({ location, radius: 10000, type: 'police' }, (results, status) => {
       if (status === google.maps.places.PlacesServiceStatus.OK && results) {
         const stations = results.map(place => ({
@@ -117,7 +110,6 @@ export default function CommunityMap() {
       }
     });
 
-    // Fetch Hospitals
     service.nearbySearch({ location, radius: 10000, type: 'hospital' }, (results, status) => {
       if (status === google.maps.places.PlacesServiceStatus.OK && results) {
         const hosp = results.map(place => ({
@@ -132,13 +124,11 @@ export default function CommunityMap() {
     });
   };
 
-  // 3. Trigger fetch when map loads initially
   const onMapLoad = useCallback((map: google.maps.Map) => {
     mapRef.current = map;
     fetchPlacesData(map, mapCenter);
   }, [mapCenter]);
 
-  // 4. Re-fetch if user's GPS updates the map center after map has loaded
   useEffect(() => {
     if (mapRef.current && isLoaded) {
       fetchPlacesData(mapRef.current, mapCenter);
@@ -178,13 +168,13 @@ export default function CommunityMap() {
   return (
     <div className="relative w-full h-[calc(100vh-76px)] overflow-hidden bg-[#FCFAF5] dark:bg-[#09090B]">
       
-      {/* FLOATING TOP-LEFT STAT CHIP */}
+      {}
       <div className="absolute top-4 left-4 z-[400] bg-white/90 dark:bg-[#18181B]/90 backdrop-blur-xl px-4 py-2.5 rounded-full shadow-lg border border-[#E2E8F0] dark:border-[#27272A] flex items-center gap-2">
         <span className="text-[16px]">📍</span>
         <span className="text-[13px] font-bold text-[#1E293B] dark:text-[#E5E7EB]">{hazards.length} active issues</span>
       </div>
 
-      {/* COLLAPSIBLE DATA LAYERS MENU */}
+      {}
       <div className="absolute top-4 right-4 z-[400] flex flex-col items-end gap-2">
         <button 
           onClick={() => setIsLayersMenuOpen(!isLayersMenuOpen)}
@@ -200,7 +190,7 @@ export default function CommunityMap() {
             <h3 className="text-[#1E293B] dark:text-[#E5E7EB] font-bold mb-3 text-[14px]" style={{fontFamily: 'var(--font-jakarta)'}}>Map Layers</h3>
             <div className="space-y-4">
               
-              {/* Hazards Layer */}
+              {}
               <button onClick={() => toggleLayer("hazards")} className="flex items-center justify-between w-full">
                 <div className="flex items-center gap-2">
                   <AlertTriangle size={16} className={layers.hazards ? "text-[#EF4444]" : "text-[#9CA3AF] dark:text-[#71717A]"} />
@@ -211,7 +201,7 @@ export default function CommunityMap() {
                 </div>
               </button>
 
-              {/* Police Layer */}
+              {}
               <button onClick={() => toggleLayer("police")} className="flex items-center justify-between w-full">
                 <div className="flex items-center gap-2">
                   <ShieldAlert size={16} className={layers.police ? "text-[#F59E0B]" : "text-[#9CA3AF] dark:text-[#71717A]"} />
@@ -222,7 +212,7 @@ export default function CommunityMap() {
                 </div>
               </button>
 
-              {/* Hospitals Layer */}
+              {}
               <button onClick={() => toggleLayer("hospitals")} className="flex items-center justify-between w-full">
                 <div className="flex items-center gap-2">
                   <PlusSquare size={16} className={layers.hospitals ? "text-[#3B82F6]" : "text-[#9CA3AF] dark:text-[#71717A]"} />
@@ -233,7 +223,7 @@ export default function CommunityMap() {
                 </div>
               </button>
 
-              {/* CCTV Layer */}
+              {}
               <button onClick={() => toggleLayer("cctv")} className="flex items-center justify-between w-full">
                 <div className="flex items-center gap-2">
                   <Video size={16} className={layers.cctv ? "text-[#516B8B]" : "text-[#9CA3AF] dark:text-[#71717A]"} />
@@ -249,7 +239,7 @@ export default function CommunityMap() {
         )}
       </div>
 
-      {/* GOOGLE MAPS COMPONENT */}
+      {}
       <GoogleMap
         mapContainerStyle={mapContainerStyle}
         zoom={14}
@@ -262,10 +252,10 @@ export default function CommunityMap() {
         }}
         onClick={() => { setSelectedHazard(null); setSelectedFacility(null); }}
       >
-        {/* User Location Marker */}
+        {}
         <Marker position={mapCenter} icon={getMarkerIcon("#10B981", 9)} />
 
-        {/* FIREBASE HAZARD DATA (RED) */}
+        {}
         {layers.hazards && hazards.map((hazard) => (
           <Marker 
             key={hazard.id} 
@@ -275,7 +265,7 @@ export default function CommunityMap() {
           />
         ))}
 
-        {/* FIXED CCTV DATA (SLATE) */}
+        {}
         {layers.cctv && mockCCTV.map((cam) => (
           <Circle 
             key={cam.id}
@@ -285,7 +275,7 @@ export default function CommunityMap() {
           />
         ))}
 
-        {/* POLICE STATIONS (AMBER) */}
+        {}
         {layers.police && policeStations.map((station) => (
           <div key={station.id}>
             <Marker 
@@ -301,7 +291,7 @@ export default function CommunityMap() {
           </div>
         ))}
 
-        {/* HOSPITALS (BLUE) */}
+        {}
         {layers.hospitals && hospitals.map((hospital) => (
           <div key={hospital.id}>
             <Marker 
@@ -317,7 +307,7 @@ export default function CommunityMap() {
           </div>
         ))}
 
-        {/* UNIFIED INFO WINDOW FOR FACILITIES (POLICE / HOSPITAL) */}
+        {}
         {selectedFacility && (
           <InfoWindow 
             position={{ lat: selectedFacility.lat, lng: selectedFacility.lng }} 
@@ -333,12 +323,12 @@ export default function CommunityMap() {
         )}
       </GoogleMap>
 
-      {/* BOTTOM SHEET FOR SELECTED HAZARD */}
+      {}
       <div 
         className={`absolute bottom-4 left-4 right-4 bg-white/95 dark:bg-[#18181B]/95 backdrop-blur-2xl border border-[#E2E8F0] dark:border-[#27272A] rounded-[24px] shadow-[0_10px_40px_rgba(0,0,0,0.2)] dark:shadow-[0_10px_40px_rgba(0,0,0,0.5)] transition-all duration-300 z-[500] p-5 ${selectedHazard ? 'translate-y-0 opacity-100 pointer-events-auto' : 'translate-y-[150%] opacity-0 pointer-events-none'}`}
       >
         {selectedHazard && (() => {
-          // Resolve image URL: prefer first item in media array, fallback to mediaUrl
+          
           const imgSrc: string =
             (selectedHazard.media?.[0]?.url) ||
             selectedHazard.mediaUrl ||
@@ -347,14 +337,14 @@ export default function CommunityMap() {
           return (
             <div className="flex flex-col gap-3">
 
-              {/* ── PHOTO PREVIEW ── */}
+              {}
               {imgSrc && (
                 <div
                   className="relative w-full rounded-[16px] overflow-hidden bg-[#F3F4F6] dark:bg-[#09090B] cursor-pointer group"
                   style={{ height: "180px" }}
                   onClick={() => setLightboxOpen(true)}
                 >
-                  {/* Skeleton shimmer while loading */}
+                  {}
                   {!imgLoaded && (
                     <div className="absolute inset-0 animate-pulse bg-gradient-to-r from-[#E5E7EB] via-[#F3F4F6] to-[#E5E7EB] dark:from-[#27272A] dark:via-[#3F3F46] dark:to-[#27272A]" />
                   )}
@@ -365,15 +355,15 @@ export default function CommunityMap() {
                       imgLoaded ? "opacity-100" : "opacity-0"
                     }`}
                     onLoad={() => setImgLoaded(true)}
-                    onError={() => setImgLoaded(true)} // hide skeleton even on error
+                    onError={() => setImgLoaded(true)} 
                   />
-                  {/* Zoom hint overlay */}
+                  {}
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
                     <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 rounded-full p-2">
                       <ZoomIn size={20} className="text-white" />
                     </div>
                   </div>
-                  {/* Badge */}
+                  {}
                   <span className="absolute top-2 left-2 bg-black/60 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
                     📷 Evidence Photo
                   </span>
@@ -416,7 +406,7 @@ export default function CommunityMap() {
         })()}
       </div>
 
-      {/* ── FULL-SCREEN LIGHTBOX ── */}
+      {}
       {lightboxOpen && selectedHazard && (() => {
         const imgSrc: string =
           (selectedHazard.media?.[0]?.url) ||

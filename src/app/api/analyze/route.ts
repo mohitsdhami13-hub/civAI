@@ -9,9 +9,6 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const timeout = (ms: number, message: string = "Request timed out") =>
   new Promise<never>((_, reject) => setTimeout(() => reject(new Error(message)), ms));
 
-// Retry once on 503 "High Demand" with a 2s delay before giving up.
-// gemini-3.5-flash can hit transient demand spikes; one retry resolves
-// the vast majority of them without any UX impact.
 async function withRetry<T>(fn: () => Promise<T>, retries = 1, delayMs = 2000): Promise<T> {
   try {
     return await fn();
@@ -35,26 +32,6 @@ const RATE_LIMIT_WINDOW_MS = 60_000;
 const MAX_REQS_PER_WINDOW = 10;
 const rateLimitMap = new Map<string, { count: number; timestamp: number }>();
 
-// ─── CIVIC CATEGORY TAXONOMY ────────────────────────────────────────────────
-// Single source of truth for issue_category. Used both as the Vision AI's
-// response schema enum (forces a consistent, predictable slug instead of a
-// free-form string) and to generate the human-readable list injected into
-// the prompt, so the two can never drift out of sync.
-//
-// IMPORTANT: "pothole" and "garbage" are kept exactly as-is because existing
-// authority_map.json entries (Shimla/Solan pothole, Mumbai garbage, Punjab
-// pothole, per the original dataset) key off these exact strings via an
-// EXACT, case-sensitive match in resolveAuthority(). Renaming them would
-// silently break those existing local-officer matches.
-//
-// The new categories below (traffic_signal, public_toilet, tree_park,
-// stray_animal, encroachment, noise_pollution, air_pollution, etc.) have no
-// district/city/state entries in authority_map.json yet. That's fine —
-// resolveAuthority()'s tier logic already falls through cleanly to the
-// CPGRAMS national fallback (tier 4) for any category with no specific
-// match, so these route correctly today and will automatically start using
-// real local contacts the moment matching entries are added to
-// authority_map.json — no code change needed here when that happens.
 const CIVIC_CATEGORIES: { slug: string; desc: string }[] = [
   { slug: "pothole", desc: "damaged/broken road surface, potholes, severely cracked pavement" },
   { slug: "road_damage", desc: "other road-surface failures (collapsed road edge, broken divider, missing manhole cover) distinct from a simple pothole" },
@@ -106,49 +83,24 @@ async function reverseGeocode(lat: number, lng: number): Promise<{ addressName: 
   return { addressName: "Solan, Himachal Pradesh", district: "Solan", state: "Himachal Pradesh", city: "Solan" };
 }
 
-// ─── AUTHORITY RESOLUTION ───────────────────────────────────────────────────
-// Resolution order, each tier only used if the previous one has no match:
-//   1. Exact district + category match (e.g. Shimla + pothole) — fully
-//      verified local officer contact.
-//   2. City + category match (e.g. Mumbai + garbage) — verified HQ-level
-//      body for that specific metro, where district-level data isn't
-//      available but city-level is (e.g. BMC, BBMP).
-//   3. State + category match (e.g. Punjab + pothole) — verified state HQ
-//      contact when no city/district entry exists.
-//   4. National CPGRAMS fallback — always exists, always real, works for
-//      any department/state/category in India, including every new
-//      category in CIVIC_CATEGORIES above that doesn't have a specific
-//      entry in authority_map.json yet.
-//
-// IMPORTANT: this function never fabricates a contact. If hasEmail/hasPhone
-// aren't explicitly true on a fallback-tier entry, the UI must not render
-// a button for that channel — see authority_contact.hasEmail/hasPhone in
-// the response, which the dashboard reads directly.
-//
-// Unchanged from the original implementation — left exactly as-is so
-// existing district/city/state matches keep working without risk.
 function resolveAuthority(category: string, district: string, state: string, city: string) {
   const entries = authorityMap as any[];
 
-  // Tier 1: exact district match (original Shimla/Solan dataset)
   const districtMatch = entries.find(
     (e) => e.district?.toLowerCase() === district.toLowerCase() && e.category === category
   );
   if (districtMatch) return { ...districtMatch, hasEmail: !!districtMatch.email, hasPhone: !!districtMatch.phone, matchTier: "district" };
 
-  // Tier 2: exact city match (e.g. Mumbai, Bengaluru, Delhi metro bodies)
   const cityMatch = entries.find(
     (e) => e.city?.toLowerCase() === city.toLowerCase() && e.category === category
   );
   if (cityMatch) return { ...cityMatch, matchTier: "city" };
 
-  // Tier 3: state-level HQ match
   const stateMatch = entries.find(
     (e) => e.state?.toLowerCase() === state.toLowerCase() && e.category === category
   );
   if (stateMatch) return { ...stateMatch, matchTier: "state" };
 
-  // Tier 4: national CPGRAMS fallback — always present, always real
   const national = entries.find((e) => e.category === "national_fallback");
   return { ...national, matchTier: "national" };
 }
@@ -169,10 +121,7 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    // mediaUrls: full array of uploaded Storage URLs for this report (used to
-    // attach links in the formal email body, since mailto: cannot carry real
-    // attachments). description: the user's own words about the issue, fed
-    // to the AI as additional grounding context, not just the image alone.
+
     const { image, mimeType, lat, lng, description, mediaUrls } = body;
 
     if (!image || typeof image !== 'string') {
@@ -194,9 +143,6 @@ export async function POST(request: Request) {
 
     const complaintId = `CIV-${Math.floor(100000 + Math.random() * 900000)}`;
 
-    // ==========================================
-    // PARALLEL EXECUTION: GEOCODING & VISION
-    // ==========================================
     const geocodePromise = reverseGeocode(lat, lng);
     const VISION_MODEL = "gemini-3.5-flash";
 
@@ -209,17 +155,10 @@ export async function POST(request: Request) {
         properties: {
           is_genuine_civic_issue: { type: "boolean" },
           rejection_reason: { type: "string" },
-          // Cross-check it's actually a government-jurisdiction issue,
-          // separate from "is this a real hazard at all" — distinguishes
-          // a real hazard from a real hazard that's also something a
-          // government department is actually responsible for (vs e.g.
-          // private property damage, a civil dispute, or something
-          // outside any civic department's mandate).
+
           is_government_jurisdiction: { type: "boolean" },
           jurisdiction_reasoning: { type: "string" },
-          // Constrained to a known taxonomy (see CIVIC_CATEGORIES) so the
-          // category string reliably matches authority_map.json entries
-          // and covers far more than roads/garbage.
+
           issue_category: { type: "string", enum: CIVIC_CATEGORY_ENUM },
           sub_type: { type: "string" },
           severity: { type: "integer" },
@@ -229,10 +168,7 @@ export async function POST(request: Request) {
           evidence_description: { type: "string" },
           urgency_flag: { type: "string" },
           estimated_affected_radius_meters: { type: "integer" },
-          // Anti-misuse: whether the citizen's written description (if any)
-          // is actually consistent with what's visible in the image. Lets
-          // the server hard-block mismatched/gamed submissions before they
-          // ever reach the (separate, token-costing) drafting call.
+
           is_context_aligned: { type: "boolean" },
           context_alignment_reasoning: { type: "string" },
         },

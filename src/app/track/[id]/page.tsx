@@ -10,7 +10,6 @@ import {
   Flame, Timer, ShieldAlert
 } from "lucide-react";
 
-// Haptic feedback helper
 const triggerHaptic = (pattern: number | number[] = 50) => {
   if (typeof window !== "undefined" && navigator.vibrate) {
     navigator.vibrate(pattern);
@@ -29,15 +28,14 @@ export default function TrackReportPage() {
     const fetchReport = async () => {
       try {
         let reportData = null;
-        
-        // 1. Fetch directly by Document ID
+
         const docRef = doc(db, "complaints", id as string);
         const docSnap = await getDoc(docRef);
         
         if (docSnap.exists()) {
           reportData = { id: docSnap.id, ...docSnap.data() };
         } else {
-          // 2. Fallback: Query by custom complaintId
+          
           const q = query(collection(db, "complaints"), where("complaintId", "==", id));
           const qSnap = await getDocs(q);
           if (!qSnap.empty) {
@@ -58,7 +56,6 @@ export default function TrackReportPage() {
     if (id) fetchReport();
   }, [id]);
 
-  // Handle Escalation to Firebase
   const handleEscalate = async () => {
     if (!report || report.status === 'escalated' || report.status === 'resolved') return;
     
@@ -78,7 +75,6 @@ export default function TrackReportPage() {
     }
   };
 
-  // UI Helpers
   const getCategoryConfig = (type = "") => {
     const t = type.toLowerCase();
     if (t.includes("water") || t.includes("leak") || t.includes("pipe")) return { Icon: Droplet, color: "text-[#EF4444]", bg: "bg-[#FEE2E2] dark:bg-[#7F1D1D]/40" };
@@ -93,7 +89,6 @@ export default function TrackReportPage() {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
-  // Calculate Days Elapsed
   const getDaysElapsed = () => {
     if (!report?.createdAt) return 0;
     const date = report.createdAt.seconds ? new Date(report.createdAt.seconds * 1000) : new Date(report.createdAt);
@@ -101,7 +96,6 @@ export default function TrackReportPage() {
     return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)));
   };
 
-  // Timeline Logic Helper
   const getTimelineState = (currentStatus = "filed") => {
     const s = currentStatus.toLowerCase();
     const steps = [
@@ -147,7 +141,7 @@ export default function TrackReportPage() {
   return (
     <main className="w-full max-w-md mx-auto flex flex-col min-h-screen bg-[#FCFAF5] dark:bg-[#09090B] pb-10">
       
-      {/* TOP NAVBAR */}
+      {}
       <nav className="sticky top-0 z-50 bg-[#FCFAF5]/90 dark:bg-[#09090B]/90 backdrop-blur-xl px-4 h-16 flex items-center justify-between border-b border-[#E2E8F0] dark:border-[#27272A]">
         <button onClick={() => router.back()} className="w-10 h-10 flex items-center justify-center rounded-full bg-white dark:bg-[#18181B] shadow-sm text-[#1E293B] dark:text-[#E5E7EB] active:scale-90 transition-transform">
           <ChevronLeft size={24} />
@@ -158,7 +152,7 @@ export default function TrackReportPage() {
 
       <div className="px-5 pt-6 flex flex-col gap-6">
         
-        {/* HERO INFO CARD */}
+        {}
         <div className="bg-white dark:bg-[#18181B] border border-[#E2E8F0] dark:border-transparent rounded-[24px] p-6 shadow-sm flex flex-col items-center text-center">
           <div className={`w-16 h-16 rounded-[20px] ${catConfig.bg} flex items-center justify-center mb-4`}>
             <Icon size={32} className={catConfig.color} strokeWidth={2.5} />
@@ -176,7 +170,7 @@ export default function TrackReportPage() {
           </div>
         </div>
 
-        {/* 7-DAY SLA PROGRESS & ESCALATION */}
+        {}
         {report.status !== 'resolved' && (
           <div className="bg-white dark:bg-[#18181B] border border-[#E2E8F0] dark:border-transparent rounded-[24px] p-5 shadow-sm">
             <div className="flex justify-between items-end mb-3">
@@ -191,7 +185,7 @@ export default function TrackReportPage() {
               <span className="text-[20px] font-black text-[#516B8B] dark:text-[#E5E7EB]">{daysElapsed}<span className="text-[14px] text-[#9CA3AF] dark:text-[#71717A]">/7</span></span>
             </div>
             
-            {/* Progress Bar */}
+            {}
             <div className="w-full h-2.5 bg-[#F3F4F6] dark:bg-[#09090B] rounded-full overflow-hidden mb-5">
               <div 
                 className={`h-full rounded-full transition-all duration-1000 ${daysElapsed >= 7 ? 'bg-[#EF4444]' : 'bg-[#516B8B] dark:bg-[#E5E7EB]'}`} 
@@ -199,7 +193,7 @@ export default function TrackReportPage() {
               />
             </div>
 
-            {/* Escalate Button */}
+            {}
             {isEscalatable ? (
               <button 
                 onClick={handleEscalate}
@@ -221,7 +215,7 @@ export default function TrackReportPage() {
           </div>
         )}
 
-        {/* VISUAL TIMELINE STEPPER */}
+        {}
         <div className="bg-white dark:bg-[#18181B] border border-[#E2E8F0] dark:border-transparent rounded-[24px] p-6 shadow-sm">
           <h3 className="font-black text-[16px] text-[#1E293B] dark:text-[#E5E7EB] mb-5" style={{fontFamily: 'var(--font-jakarta)'}}>Resolution Progress</h3>
           
@@ -255,7 +249,7 @@ export default function TrackReportPage() {
           </div>
         </div>
 
-        {/* METADATA CARDS */}
+        {}
         <div className="grid grid-cols-2 gap-3">
           <div className="bg-[#F8F9FC] dark:bg-[#18181B] border border-[#E2E8F0] dark:border-transparent p-4 rounded-[20px] shadow-sm">
             <span className="text-[11px] font-bold text-[#516B8B] dark:text-[#E5E7EB] uppercase tracking-wider">Record Token</span>
@@ -270,7 +264,7 @@ export default function TrackReportPage() {
           </div>
         </div>
 
-        {/* FORMAL COMPLAINT LOG */}
+        {}
         {report.formalComplaint && (
           <div className="bg-white dark:bg-[#18181B] border border-[#E2E8F0] dark:border-transparent rounded-[24px] p-6 shadow-sm mb-6">
             <div className="flex items-center gap-2 mb-3">

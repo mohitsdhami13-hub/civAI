@@ -6,11 +6,9 @@ import { Bell, X, CheckCircle, Info } from "lucide-react";
 export default function NotificationBell() {
   const [hasUnread, setHasUnread] = useState(true);
   const [isOpen, setIsOpen] = useState(false);
-  
-  // Ref to track if the user is swiping vs tapping
+
   const dragRef = useRef({ x: 0, y: 0, isDragging: false });
 
-  // Prevent background scrolling when the drawer is open
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = 'hidden';
@@ -95,12 +93,12 @@ export default function NotificationBell() {
           </button>
         </div>
 
-        {/* Notification List */}
+        {}
         <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
           
-          {/* Notification 1: Resolved Milestone */}
+          {}
           <div className="bg-white dark:bg-[#18181B] border border-[#E2E8F0] dark:border-[#27272A] rounded-[20px] p-4 flex gap-4 shadow-sm relative overflow-hidden">
-            {/* Unread dot */}
+            {}
             {hasUnread && <div className="absolute top-4 right-4 w-2 h-2 bg-[#EF4444] rounded-full"></div>}
             
             <div className="w-10 h-10 rounded-full bg-[#D1FAE5] dark:bg-[#064E3B] flex items-center justify-center shrink-0">
@@ -115,7 +113,7 @@ export default function NotificationBell() {
             </div>
           </div>
 
-          {/* Notification 2: Welcome Message */}
+          {}
           <div className="bg-white dark:bg-[#18181B] border border-[#E2E8F0] dark:border-[#27272A] rounded-[20px] p-4 flex gap-4 shadow-sm opacity-70">
             <div className="w-10 h-10 rounded-full bg-[#E2E8F0] dark:bg-[#27272A] flex items-center justify-center shrink-0">
               <Info size={20} className="text-[#516B8B] dark:text-[#E5E7EB]" />
