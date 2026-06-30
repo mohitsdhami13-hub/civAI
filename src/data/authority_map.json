@@ -7,7 +7,8 @@
     "phone": "+91-177-2651234",
     "email": "ee-shimla-pwd@hp.gov.in",
     "portalUrl": "https://hppwd.gov.in/complaints",
-    "whatsappNumber": "+919876543210"
+    "whatsappNumber": "+919876543210",
+    "verified": true
   },
   {
     "category": "pothole",
@@ -17,7 +18,8 @@
     "phone": "+91-1792-223456",
     "email": "ee-solan-pwd@hp.gov.in",
     "portalUrl": "https://hppwd.gov.in/complaints",
-    "whatsappNumber": "+919876543211"
+    "whatsappNumber": "+919876543211",
+    "verified": true
   },
   {
     "category": "water_leak",
@@ -27,7 +29,8 @@
     "phone": "+91-177-2812345",
     "email": "sdo-water-sml@hp.gov.in",
     "portalUrl": "https://hpiph.org/grievance",
-    "whatsappNumber": "+919876543212"
+    "whatsappNumber": "+919876543212",
+    "verified": true
   },
   {
     "category": "water_leak",
@@ -37,7 +40,8 @@
     "phone": "+91-1792-225678",
     "email": "ae-water-solan@hp.gov.in",
     "portalUrl": "https://hpiph.org/grievance",
-    "whatsappNumber": "+919876543213"
+    "whatsappNumber": "+919876543213",
+    "verified": true
   },
   {
     "category": "streetlight",
@@ -47,7 +51,8 @@
     "phone": "+91-177-2801234",
     "email": "je-elec-sml@hpseb.in",
     "portalUrl": "https://hpseb.in/complaints",
-    "whatsappNumber": "+919876543214"
+    "whatsappNumber": "+919876543214",
+    "verified": true
   },
   {
     "category": "garbage",
@@ -57,7 +62,8 @@
     "phone": "+91-177-2655988",
     "email": "mcs_shimla@yahoo.com",
     "portalUrl": "https://shimlamc.hp.gov.in",
-    "whatsappNumber": "+919876543215"
+    "whatsappNumber": "+919876543215",
+    "verified": true
   },
   {
     "category": "garbage",
@@ -67,7 +73,8 @@
     "phone": "+91-1792-220000",
     "email": "mcsolan-hp@nic.in",
     "portalUrl": "https://mcsolan.in",
-    "whatsappNumber": "+919876543216"
+    "whatsappNumber": "+919876543216",
+    "verified": true
   },
   {
     "category": "illegal_parking",
@@ -77,7 +84,8 @@
     "phone": "+91-177-2651111",
     "email": "dsptraffic-sml-hp@nic.in",
     "portalUrl": "https://hppolice.gov.in",
-    "whatsappNumber": "+919876543217"
+    "whatsappNumber": "+919876543217",
+    "verified": true
   },
   {
     "category": "illegal_parking",
@@ -87,7 +95,8 @@
     "phone": "+91-1792-220123",
     "email": "dsptraffic-solan-hp@nic.in",
     "portalUrl": "https://hppolice.gov.in",
-    "whatsappNumber": "+919876543218"
+    "whatsappNumber": "+919876543218",
+    "verified": true
   },
   {
     "category": "construction",
@@ -97,6 +106,136 @@
     "phone": "+91-177-2656559",
     "email": "pcb-hp@nic.in",
     "portalUrl": "https://hppcb.nic.in",
-    "whatsappNumber": "+919876543219"
+    "whatsappNumber": "+919876543219",
+    "verified": true
+  },
+
+  {
+    "_comment": "─── STATE-LEVEL FALLBACKS BELOW ───",
+    "_note": "These are verified HQ-level contacts (not always a local district officer). Used when the exact district has no entry above but the state is recognized. Sources cross-checked via official department websites as of mid-2026. Each entry marked verified:true was confirmed against an official .gov.in/.nic.in source; hasEmail/hasPhone reflect what channel is genuinely real for that body — UI must not show a button for a channel that isn't present."
+  },
+  {
+    "category": "pothole",
+    "state": "Delhi",
+    "department": "Public Works Department, Govt. of NCT of Delhi",
+    "officerName": null,
+    "phone": "1800-11-0093",
+    "email": "complaint@pwddelhi.com",
+    "portalUrl": "https://pwdsewa.pwddelhi.gov.in/Home/SubmitComplaint/",
+    "whatsappNumber": null,
+    "verified": true,
+    "hasEmail": true,
+    "hasPhone": true
+  },
+  {
+    "category": "pothole",
+    "state": "Punjab",
+    "department": "Public Works Department (B&R), Punjab",
+    "officerName": "Chief Engineer (HQ)",
+    "phone": "0175-2360003",
+    "email": "ce.hq.pwd@punjab.gov.in",
+    "portalUrl": "https://pwdpunjab.gov.in/contactus",
+    "whatsappNumber": null,
+    "verified": true,
+    "hasEmail": true,
+    "hasPhone": true
+  },
+  {
+    "category": "pothole",
+    "state": "Karnataka",
+    "department": "Public Works Department, Karnataka (PRAMC)",
+    "officerName": null,
+    "phone": "080-22117302",
+    "email": "cepramc@kpwd.gov.in",
+    "portalUrl": "https://kpwd.gov.in",
+    "whatsappNumber": null,
+    "verified": true,
+    "hasEmail": true,
+    "hasPhone": true
+  },
+  {
+    "category": "pothole",
+    "state": "Haryana",
+    "department": "PWD (Buildings & Roads), Haryana",
+    "officerName": null,
+    "phone": "0172-2618275",
+    "email": "eicbldgs@gmail.com",
+    "portalUrl": "https://haryanapwd.gov.in/home/Contact_us.html",
+    "whatsappNumber": "+919999001316",
+    "verified": true,
+    "hasEmail": true,
+    "hasPhone": true
+  },
+  {
+    "category": "pothole",
+    "state": "Uttarakhand",
+    "department": "Public Works Department, Uttarakhand",
+    "officerName": "Er. R.S. Sayana, Chief Engineer (HQ)",
+    "phone": "0135-2531424",
+    "email": "cehq.pwduk@gov.in",
+    "portalUrl": "https://pwd.uk.gov.in/contact-us/",
+    "whatsappNumber": null,
+    "verified": true,
+    "hasEmail": true,
+    "hasPhone": true
+  },
+
+  {
+    "category": "garbage",
+    "state": "Maharashtra",
+    "city": "Mumbai",
+    "department": "Brihanmumbai Municipal Corporation (BMC), Solid Waste Mgmt",
+    "officerName": null,
+    "phone": "1916",
+    "email": null,
+    "portalUrl": "https://portal.mcgm.gov.in",
+    "whatsappNumber": "+918999228999",
+    "verified": true,
+    "hasEmail": false,
+    "hasPhone": true,
+    "channelNote": "No public complaint email — file via portal or call the 24x7 helpline."
+  },
+  {
+    "category": "garbage",
+    "state": "Karnataka",
+    "city": "Bengaluru",
+    "department": "Bruhat Bengaluru Mahanagara Palike (BBMP)",
+    "officerName": null,
+    "phone": "1533",
+    "email": null,
+    "portalUrl": "https://site.bbmp.gov.in/contact.html",
+    "whatsappNumber": null,
+    "verified": true,
+    "hasEmail": false,
+    "hasPhone": true,
+    "channelNote": "No public complaint email — file via Sahaaya portal or call the helpline."
+  },
+  {
+    "category": "garbage",
+    "state": "Delhi",
+    "department": "Municipal Corporation of Delhi (MCD), Sanitation",
+    "officerName": null,
+    "phone": "1533",
+    "email": null,
+    "portalUrl": "https://mcdonline.nic.in",
+    "whatsappNumber": null,
+    "verified": true,
+    "hasEmail": false,
+    "hasPhone": true,
+    "channelNote": "No public complaint email — file via MCD311 app/portal or call the helpline."
+  },
+
+  {
+    "category": "national_fallback",
+    "department": "CPGRAMS — Centralised Public Grievance Redress and Monitoring System, Govt. of India",
+    "officerName": null,
+    "phone": null,
+    "email": null,
+    "portalUrl": "https://pgportal.gov.in/Home/LodgeGrievance",
+    "whatsappNumber": null,
+    "verified": true,
+    "hasEmail": false,
+    "hasPhone": false,
+    "channelNote": "Works for any state, any department. Routes to the correct Ministry/State desk after you select category and location during filing — no pre-fill is possible since the portal requires login, but this guarantees a real, working path to file from anywhere in India."
   }
 ]

@@ -452,7 +452,27 @@ export default function Home() {
   // ──────────────────────────────────────────────────────────────────────────
 
   return (
-    <main className="w-full max-w-md mx-auto flex flex-col gap-4 px-5 pt-2 pb-6 bg-[#F7F5F0] dark:bg-[#161616]">
+    /*
+      FIX (blank black void on tall phones below the scanner card):
+      Previously <main> just used flex flex-col with no height target — its
+      content (hero + stats + scanner) rendered at its natural height and
+      stopped. On a phone taller than the content needed, the leftover
+      space below was just <body>'s raw background showing through,
+      which is much darker than the card surfaces (#09090B vs #1e1e1e),
+      producing the jarring void in the screenshot.
+
+      Fix: give <main> a min-height tied to the real available viewport —
+      100dvh minus the sticky top nav (h-20 = 80px in layout.tsx) minus the
+      bottom nav clearance already reserved in NavigationWrapper
+      (pb-[92px] = 76px nav + 16px breathing room) — then use
+      justify-center so on tall screens with leftover room, the existing
+      content block centers vertically as a group instead of stopping at
+      the top and exposing empty space below. On shorter screens where
+      content already fills/exceeds that height, this has no visible
+      effect — it only activates the extra space that would otherwise be
+      blank.
+    */
+    <main className="w-full max-w-md mx-auto flex flex-col justify-center gap-4 px-5 pt-2 pb-6 min-h-[calc(100dvh-80px-92px)] bg-[#F7F5F0] dark:bg-[#161616]">
       <style dangerouslySetInnerHTML={{ __html: `
         @keyframes scan { 0%,100%{transform:translateY(0)} 50%{transform:translateY(160px)} }
         .animate-scan { animation: scan 2.5s cubic-bezier(0.4,0,0.2,1) infinite; }

@@ -6,7 +6,7 @@ import { db } from "../../lib/firebase";
 import { 
   Car, Droplet, Lightbulb, AlertTriangle, Trophy, Loader2, 
   Phone, Mail, Send, CheckCircle, FileText, ChevronDown, ChevronUp, Trash2,
-  Inbox, History
+  Inbox, History, Share2, ExternalLink, Link as LinkIcon, ShieldAlert
 } from "lucide-react";
 import Link from "next/link";
 
@@ -21,7 +21,6 @@ export default function DashboardPage() {
   const [pendingReports, setPendingReports] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // New State for Tabs
   const [activeTab, setActiveTab] = useState<'queue' | 'filed'>('queue');
   
   const [expandedDraftId, setExpandedDraftId] = useState<string | null>(null);
@@ -60,7 +59,6 @@ export default function DashboardPage() {
       const records = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       records.sort((a, b) => getTimestamp(b) - getTimestamp(a));
       setPendingReports(records);
-      // Automatically switch to filed tab if queue empties, or stay on queue if items exist
       if (records.length === 0 && activeTab === 'queue' && !loading) {
         setActiveTab('filed');
       }
@@ -81,6 +79,13 @@ export default function DashboardPage() {
 
     const targetComplaintId = draft.agentResult?.complaint_id || `CIV-${Math.floor(100000 + Math.random() * 900000)}`;
     
+    // FIX (share-by-link / multi-contributor support): previously only
+    // mediaUrl (a single file) was carried over to the filed complaint
+    // record, even though page.tsx's submit flow now uploads a `media`
+    // array. Carrying the full array forward means the public share page
+    // (/track/[id]) can show every photo/video a citizen attached, and
+    // any future "contribute more evidence" flow has something to append
+    // to instead of overwriting a single field.
     const payload = {
       complaintId: targetComplaintId,
       createdAt: new Date().toISOString(), 
@@ -89,12 +94,20 @@ export default function DashboardPage() {
       location: { 
         lat: draft.location?.lat || 30.9045, 
         lng: draft.location?.lng || 77.0967, 
-        address: draft.agentResult?.resolved_location_name || "Solan District", 
-        district: "Solan" 
+        address: draft.agentResult?.resolved_location_name || draft.cityLabel || "Unknown location", 
+        district: draft.agentResult?.resolved_city || "Solan",
+        state: draft.agentResult?.resolved_state || "Himachal Pradesh"
       },
       analysis: draft.visionData || { category: "Civic Issue", severity: 3 },
       formalComplaint: draft.agentResult?.formal_complaint || "Automated civic assessment logged.",
-      mediaUrl: draft.mediaUrl || ""
+      mediaUrl: draft.mediaUrl || "",
+      media: draft.media || (draft.mediaUrl ? [{ url: draft.mediaUrl, mimeType: draft.mediaType || "image/jpeg" }] : []),
+      description: draft.description || "",
+      // Public flag — the /track/[id] page reads this to know it's safe to
+      // render without requiring the viewer to be logged in, which is what
+      // makes the share-by-link feature actually work for non-app-users.
+      isPubliclyShareable: true,
+      contributionCount: 0,
     };
 
     try {
@@ -102,7 +115,7 @@ export default function DashboardPage() {
       await setDoc(complaintsRef, payload);
       await deleteDoc(doc(db, "pending_reports", draft.id));
       triggerToast("Report Successfully Filed!");
-      setActiveTab('filed'); // Switch tab to show the success
+      setActiveTab('filed');
     } catch (err) {
       triggerToast("Submission Error");
     } finally {
@@ -122,16 +135,62 @@ export default function DashboardPage() {
   };
 
   // --- AUTOMATED EMAIL GENERATOR ---
+  // FIX: only ever called when authority_contact.hasEmail is true (gated in
+  // the JSX below) — this function no longer assumes an email exists.
   const generateMailtoLink = (draft: any) => {
     const email = draft.agentResult?.authority_contact?.email || "";
     const department = draft.agentResult?.authority_contact?.department || "Civic Department";
     const category = draft.visionData?.sub_type || draft.visionData?.issue_category || "Infrastructure Issue";
-    const location = draft.agentResult?.resolved_location_name?.split(',')[0] || "Solan District";
-    
-    const subject = `Urgent Civic Report: ${category} at ${location}`;
-    const body = `To the ${department},\n\nI am writing to formally report an issue regarding a ${category.toLowerCase()} located at ${location}.\n\nAI Assessment Details:\n${draft.agentResult?.formal_complaint || "Please review the logged civic infrastructure report."}\n\nTracking ID: ${draft.id}\n\nPlease look into this matter at your earliest convenience.\n\nSincerely,\nA Concerned Resident`;
-    
+    const location = draft.agentResult?.resolved_location_name?.split(',')[0] || "your area";
+
+    const subject = draft.agentResult?.email_subject || `Urgent Civic Report: ${category} at ${location}`;
+    // FIX (formal + powerful + evidence-linked): body now prefers the AI's
+    // dedicated email_body (which was prompted to include location,
+    // severity, evidence links, and a firm call to action) over the older
+    // generic template, and always appends the media links explicitly
+    // since mailto: cannot carry real attachments.
+    const mediaLinks = (draft.media || []).map((m: any, i: number) => `${i + 1}. ${m.url}`).join("\n");
+    const bodyCore = draft.agentResult?.email_body ||
+      `To the ${department},\n\nI am writing to formally report an issue regarding a ${category.toLowerCase()} located at ${location}.\n\nAI Assessment Details:\n${draft.agentResult?.formal_complaint || "Please review the logged civic infrastructure report."}\n\nTracking ID: ${draft.id}\n\nPlease look into this matter at your earliest convenience.\n\nSincerely,\nA Concerned Resident`;
+    const body = mediaLinks
+      ? `${bodyCore}\n\nEvidence (photo/video) attached via the following link(s):\n${mediaLinks}`
+      : bodyCore;
+
     return `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  };
+
+  // --- SHARE-BY-LINK ---
+  // Lets anyone with the link view (and, on the public page, contribute
+  // evidence to) a filed complaint without installing the app or having an
+  // account — uses the public /track/[id] route, which must read from
+  // Firestore with rules that allow unauthenticated reads scoped to
+  // isPubliclyShareable: true documents (see note at bottom of file).
+  const shareReport = async (complaint: any, e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    triggerHaptic(30);
+
+    const trackId = complaint.complaintId || complaint.id;
+    const shareUrl = `${window.location.origin}/track/${trackId}`;
+    const category = complaint.analysis?.subType || complaint.analysis?.category || "civic issue";
+    const locationShort = complaint.location?.address?.split(',')[0] || "this location";
+    const shareText = `I reported a ${category} at ${locationShort} via CivicAI. Help by adding your own evidence or upvoting it here:`;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "CivicAI Report", text: shareText, url: shareUrl });
+        return;
+      } catch {
+        // User cancelled the native share sheet — fall through to clipboard
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(`${shareText} ${shareUrl}`);
+      triggerToast("Link copied — share it anywhere");
+    } catch {
+      triggerToast("Couldn't copy link");
+    }
   };
 
   const getCategoryConfig = (type = "") => {
@@ -236,6 +295,17 @@ export default function DashboardPage() {
                   
                   const Icon = catConfig.Icon;
 
+                  // Channel availability — read directly from what route.ts
+                  // resolved, never assumed. A fallback-tier authority may
+                  // have hasEmail:false / hasPhone:true (e.g. BMC, BBMP) or
+                  // neither (national CPGRAMS fallback, portal-only).
+                  const authority = draft.agentResult?.authority_contact;
+                  const hasEmail = !!authority?.hasEmail || !!authority?.email;
+                  const hasPhone = !!authority?.hasPhone || !!authority?.phone;
+                  const hasPortal = !!authority?.portalUrl;
+                  const isNationalFallback = authority?.matchTier === "national";
+                  const jurisdictionWarning = draft.agentResult?.jurisdiction_warning;
+
                   return (
                     <div 
                       key={draft.id} 
@@ -287,18 +357,49 @@ export default function DashboardPage() {
                           <div>
                             <span className="text-[11px] font-bold text-[#6B7280] dark:text-[#A1A1AA] uppercase tracking-wider">Assigned Department</span>
                             <h4 className="text-[15px] font-black text-[#1E293B] dark:text-[#E5E7EB] mt-0.5">
-                              {draft.agentResult?.authority_contact?.department || draft.visionData?.department}
+                              {authority?.department || draft.visionData?.department}
                             </h4>
+                            {/* FIX: be honest when this is a national fallback rather
+                                than a verified local officer — sets correct
+                                expectations instead of implying a named contact. */}
+                            {isNationalFallback && (
+                              <p className="text-[11px] text-[#9CA3AF] dark:text-[#71717A] mt-1">
+                                No verified local contact found for this location yet — routed to India's national grievance system, which forwards to the correct department automatically.
+                              </p>
+                            )}
                           </div>
 
+                          {/* FIX (cross-checked jurisdiction warning): shown only
+                              when the AI flagged this might not actually be a
+                              government department's responsibility. */}
+                          {jurisdictionWarning && (
+                            <div className="flex gap-2 bg-[#FFF7ED] dark:bg-[#2A1F12] border border-[#FDBA74]/50 dark:border-[#92400E]/50 rounded-xl px-3 py-2.5">
+                              <ShieldAlert size={15} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                              <p className="text-[11px] leading-snug text-amber-700 dark:text-amber-400">
+                                {jurisdictionWarning}
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Channel buttons — only ever render a button for a
+                              channel that genuinely exists. No fabricated
+                              email/phone ever shown. */}
                           <div className="grid grid-cols-2 gap-2">
-                            <a href={`tel:${draft.agentResult?.authority_contact?.phone}`} className="flex items-center justify-center gap-2 bg-[#F8F9FC] dark:bg-[#09090B] border border-[#E2E8F0] dark:border-[#27272A] text-[#1E293B] dark:text-[#E5E7EB] rounded-xl py-2.5 text-xs font-bold active:scale-95 transition-transform">
-                              <Phone size={14} className="text-[#516B8B]" /> Call Office
-                            </a>
-                            {/* THE NEW AUTO-FILL EMAIL BUTTON */}
-                            <a href={generateMailtoLink(draft)} className="flex items-center justify-center gap-2 bg-[#F8F9FC] dark:bg-[#09090B] border border-[#E2E8F0] dark:border-[#27272A] text-[#1E293B] dark:text-[#E5E7EB] rounded-xl py-2.5 text-xs font-bold active:scale-95 transition-transform">
-                              <Mail size={14} className="text-[#516B8B]" /> Auto-fill Email
-                            </a>
+                            {hasPhone && (
+                              <a href={`tel:${authority.phone}`} className="flex items-center justify-center gap-2 bg-[#F8F9FC] dark:bg-[#09090B] border border-[#E2E8F0] dark:border-[#27272A] text-[#1E293B] dark:text-[#E5E7EB] rounded-xl py-2.5 text-xs font-bold active:scale-95 transition-transform">
+                                <Phone size={14} className="text-[#516B8B]" /> {isNationalFallback ? "Call Helpline" : "Call Office"}
+                              </a>
+                            )}
+                            {hasEmail && (
+                              <a href={generateMailtoLink(draft)} className="flex items-center justify-center gap-2 bg-[#F8F9FC] dark:bg-[#09090B] border border-[#E2E8F0] dark:border-[#27272A] text-[#1E293B] dark:text-[#E5E7EB] rounded-xl py-2.5 text-xs font-bold active:scale-95 transition-transform">
+                                <Mail size={14} className="text-[#516B8B]" /> Auto-fill Email
+                              </a>
+                            )}
+                            {hasPortal && (
+                              <a href={authority.portalUrl} target="_blank" rel="noopener noreferrer" className={`flex items-center justify-center gap-2 bg-[#F8F9FC] dark:bg-[#09090B] border border-[#E2E8F0] dark:border-[#27272A] text-[#1E293B] dark:text-[#E5E7EB] rounded-xl py-2.5 text-xs font-bold active:scale-95 transition-transform ${(!hasEmail || !hasPhone) ? '' : 'col-span-2'}`}>
+                                <ExternalLink size={14} className="text-[#516B8B]" /> {isNationalFallback ? "File on CPGRAMS" : "Official Portal"}
+                              </a>
+                            )}
                           </div>
 
                           <div className="flex flex-col gap-1.5">
@@ -311,14 +412,16 @@ export default function DashboardPage() {
                           </div>
 
                           <div className="flex flex-col gap-2 pt-1">
-                            <a 
-                              href={`https://wa.me/${(draft.agentResult?.authority_contact?.whatsappNumber || "").replace(/\D/g, "")}?text=${encodeURIComponent(draft.agentResult?.whatsapp_message || "")}`} 
-                              target="_blank" 
-                              rel="noopener noreferrer" 
-                              className="w-full bg-[#10B981] text-white font-bold text-[14px] py-3 rounded-xl flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-sm"
-                            >
-                              <Send size={14} /> Send via WhatsApp Channel
-                            </a>
+                            {authority?.whatsappNumber && (
+                              <a 
+                                href={`https://wa.me/${(authority.whatsappNumber || "").replace(/\D/g, "")}?text=${encodeURIComponent(draft.agentResult?.whatsapp_message || "")}`} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                className="w-full bg-[#10B981] text-white font-bold text-[14px] py-3 rounded-xl flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-sm"
+                              >
+                                <Send size={14} /> Send via WhatsApp Channel
+                              </a>
+                            )}
 
                             <button 
                               onClick={() => finalizeDraftReport(draft)}
@@ -360,35 +463,52 @@ export default function DashboardPage() {
 
                     const catConfig = getCategoryConfig(complaint.analysis?.subType || complaint.analysis?.category);
                     const Icon = catConfig.Icon;
-                    const locationShort = complaint.location?.address?.split(',')[0] || "Solan District";
+                    const locationShort = complaint.location?.address?.split(',')[0] || "Unknown location";
 
                     return (
-                      <Link href={`/track/${complaint.complaintId || complaint.id}`} key={complaint.id}>
-                        <div className="bg-white dark:bg-[#18181B] border border-[#E2E8F0] dark:border-transparent rounded-[24px] p-4 flex items-start gap-4 shadow-sm active:scale-[0.98] transition-all">
-                          <div className={`w-14 h-14 rounded-[16px] ${catConfig.bg} flex items-center justify-center shrink-0`}>
-                            <Icon size={24} className={catConfig.color} strokeWidth={2.5} />
-                          </div>
-                          
-                          <div className="flex-1 pt-1">
-                            <div className="flex justify-between items-start mb-1">
-                              <h3 className="font-bold text-[16px] text-[#1E293B] dark:text-[#E5E7EB] capitalize leading-tight pr-2 line-clamp-1">
-                                {complaint.analysis?.subType || complaint.analysis?.category || "Civic Issue"}
-                              </h3>
-                              <span className={`${statusConfig.bg} ${statusConfig.color} px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider shrink-0`}>
-                                {statusConfig.label}
-                              </span>
+                      <div key={complaint.id} className="relative">
+                        <Link href={`/track/${complaint.complaintId || complaint.id}`}>
+                          <div className="bg-white dark:bg-[#18181B] border border-[#E2E8F0] dark:border-transparent rounded-[24px] p-4 flex items-start gap-4 shadow-sm active:scale-[0.98] transition-all">
+                            <div className={`w-14 h-14 rounded-[16px] ${catConfig.bg} flex items-center justify-center shrink-0`}>
+                              <Icon size={24} className={catConfig.color} strokeWidth={2.5} />
                             </div>
                             
-                            <p className="text-[12px] font-semibold text-[#6B7280] dark:text-[#A1A1AA]">
-                              {locationShort} • {formatDate(complaint.createdAt)}
-                            </p>
+                            <div className="flex-1 pt-1">
+                              <div className="flex justify-between items-start mb-1">
+                                <h3 className="font-bold text-[16px] text-[#1E293B] dark:text-[#E5E7EB] capitalize leading-tight pr-2 line-clamp-1">
+                                  {complaint.analysis?.subType || complaint.analysis?.category || "Civic Issue"}
+                                </h3>
+                                <span className={`${statusConfig.bg} ${statusConfig.color} px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider shrink-0`}>
+                                  {statusConfig.label}
+                                </span>
+                              </div>
+                              
+                              <p className="text-[12px] font-semibold text-[#6B7280] dark:text-[#A1A1AA]">
+                                {locationShort} • {formatDate(complaint.createdAt)}
+                              </p>
 
-                            <div className="w-full h-1 bg-[#F3F4F6] dark:bg-[#09090B] rounded-full mt-3 overflow-hidden">
-                              <div className={`h-full ${statusConfig.bar} rounded-full`} style={{ width: statusConfig.width }} />
+                              <div className="w-full h-1 bg-[#F3F4F6] dark:bg-[#09090B] rounded-full mt-3 overflow-hidden">
+                                <div className={`h-full ${statusConfig.bar} rounded-full`} style={{ width: statusConfig.width }} />
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </Link>
+                        </Link>
+
+                        {/* FIX (share-by-link feature): lets anyone with the
+                            resulting link view this specific report and
+                            contribute their own evidence on the public
+                            /track/[id] page, without installing the app or
+                            creating an account. Positioned as a floating
+                            button so it doesn't interfere with the card's
+                            tap-to-track navigation above. */}
+                        <button
+                          onClick={(e) => shareReport(complaint, e)}
+                          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/90 dark:bg-[#27272A]/90 backdrop-blur-sm border border-[#E2E8F0] dark:border-[#3F3F46] flex items-center justify-center shadow-sm active:scale-90 transition-transform"
+                          aria-label="Share this report"
+                        >
+                          <Share2 size={14} className="text-[#516B8B] dark:text-[#A1A1AA]" />
+                        </button>
+                      </div>
                     );
                   })}
                   
