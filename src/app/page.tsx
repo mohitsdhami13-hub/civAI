@@ -1,19 +1,27 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { storage, db } from "../lib/firebase";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { collection, addDoc, updateDoc, doc } from "firebase/firestore";
 import {
   Camera as CameraIcon, Image as ImageIcon, X,
-  TrendingUp, Check, Video, Square
+  TrendingUp, Check, Video, Square, Plus, Trash2, Send
 } from "lucide-react";
 
 const triggerHaptic = (pattern: number | number[] = 50) => {
   if (typeof window !== "undefined" && navigator.vibrate) {
     navigator.vibrate(pattern);
   }
+};
+
+type CapturedItem = {
+  id: string;
+  blob: Blob;
+  mimeType: string;
+  previewUrl: string;
+  base64ForAI: string; // empty for video items not yet frame-extracted from gallery
 };
 
 export default function Home() {
@@ -28,11 +36,53 @@ export default function Home() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const videoChunks = useRef<BlobPart[]>([]);
 
+  // Multi-capture queue (photos/videos taken before final submit)
+  const [capturedItems, setCapturedItems] = useState<CapturedItem[]>([]);
+  // Description the user types to help the AI understand the issue
+  const [description, setDescription] = useState("");
+
+  // Location
+  const [cityName, setCityName] = useState<string | null>(null);
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentUserId = "user_solan_resident_01";
+
+  // --- LOCATION: ask once on mount, fall back silently if denied ---
+  useEffect(() => {
+    if (typeof window === "undefined" || !navigator.geolocation) return;
+
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        setCoords({ lat, lng });
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=10`,
+            { headers: { Accept: "application/json" } }
+          );
+          const data = await res.json();
+          const resolvedCity =
+            data?.address?.city ||
+            data?.address?.town ||
+            data?.address?.village ||
+            data?.address?.county ||
+            null;
+          if (resolvedCity) setCityName(resolvedCity);
+        } catch {
+          // Reverse geocoding failed silently — keep generic "Your city" label
+        }
+      },
+      () => {
+        // Permission denied or unavailable — keep generic "Your city" label
+      },
+      { enableHighAccuracy: false, timeout: 8000 }
+    );
+  }, []);
 
   // --- CAMERA PIPELINE ---
   const startCameraPipeline = async () => {
@@ -60,7 +110,7 @@ export default function Home() {
     }
   };
 
-  // --- IMAGE CAPTURE ---
+  // --- IMAGE CAPTURE (adds to queue, keeps camera open for more shots) ---
   const captureImage = () => {
     triggerHaptic(50);
     if (videoRef.current && canvasRef.current) {
@@ -69,16 +119,15 @@ export default function Home() {
       canvasRef.current.height = videoRef.current.videoHeight;
       context?.drawImage(videoRef.current, 0, 0);
       const base64ForAI = canvasRef.current.toDataURL("image/jpeg", 0.8);
-      canvasRef.current.toBlob(async (blob) => {
+      canvasRef.current.toBlob((blob) => {
         if (blob) {
-          stopCameraPipeline();
-          await uploadAndQueueReport(blob, "image/jpeg", base64ForAI);
+          addCapturedItem(blob, "image/jpeg", base64ForAI);
         }
       }, "image/jpeg", 0.8);
     }
   };
 
-  // --- VIDEO CAPTURE ---
+  // --- VIDEO CAPTURE (adds to queue, keeps camera open for more shots) ---
   const startRecording = () => {
     if (!stream) return;
     triggerHaptic(50);
@@ -89,7 +138,7 @@ export default function Home() {
       if (e.data.size > 0) videoChunks.current.push(e.data);
     };
 
-    mediaRecorder.onstop = async () => {
+    mediaRecorder.onstop = () => {
       const videoBlob = new Blob(videoChunks.current, { type: "video/webm" });
       let base64ForAI = "";
       if (videoRef.current && canvasRef.current) {
@@ -99,8 +148,7 @@ export default function Home() {
         context?.drawImage(videoRef.current, 0, 0);
         base64ForAI = canvasRef.current.toDataURL("image/jpeg", 0.8);
       }
-      stopCameraPipeline();
-      await uploadAndQueueReport(videoBlob, "video/webm", base64ForAI);
+      addCapturedItem(videoBlob, "video/webm", base64ForAI);
     };
 
     mediaRecorderRef.current = mediaRecorder;
@@ -114,54 +162,92 @@ export default function Home() {
     setIsRecording(false);
   };
 
-  // --- GALLERY UPLOAD ---
-  const handleGalleryUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const isVideo = file.type.startsWith("video/");
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64ForAI = isVideo
-          ? "data:image/jpeg;base64,/9j/4AAQSkZJRgABAAAAAQABAAD/2wBDAP..."
-          : (reader.result as string);
-        await uploadAndQueueReport(file, file.type, base64ForAI);
-      };
-      if (!isVideo) {
-        reader.readAsDataURL(file);
-      } else {
-        uploadAndQueueReport(file, file.type, "");
-      }
-    }
+  // --- ADD CAPTURED ITEM TO QUEUE ---
+  const addCapturedItem = (blob: Blob, mimeType: string, base64ForAI: string) => {
+    const previewUrl = URL.createObjectURL(blob);
+    const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    setCapturedItems((prev) => [...prev, { id, blob, mimeType, previewUrl, base64ForAI }]);
   };
 
-  // --- THE MASTER QUEUE FUNCTION ---
-  const uploadAndQueueReport = async (
-    fileBlob: Blob | File,
-    mimeType: string,
-    base64ForAI: string
-  ) => {
+  const removeCapturedItem = (id: string) => {
+    triggerHaptic(20);
+    setCapturedItems((prev) => {
+      const target = prev.find((i) => i.id === id);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((i) => i.id !== id);
+    });
+  };
+
+  // --- GALLERY UPLOAD (supports multiple files at once) ---
+  const handleGalleryUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    Array.from(files).forEach((file) => {
+      const isVideo = file.type.startsWith("video/");
+      if (isVideo) {
+        // Gallery videos: no frame extraction client-side, AI gets empty preview
+        addCapturedItem(file, file.type, "");
+      } else {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          addCapturedItem(file, file.type, reader.result as string);
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+
+    // reset input so the same file can be re-selected later if removed
+    e.target.value = "";
+  };
+
+  // --- SUBMIT: uploads every queued item, then queues the report ---
+  const submitReport = async () => {
+    if (capturedItems.length === 0) return;
     setIsProcessing(true);
-    setPipelineStatus("Uploading media securely...");
     setError(null);
+
     try {
-      const ext = mimeType.includes("video") ? "webm" : "jpg";
-      const storageRef = ref(storage, `reports/${currentUserId}/${Date.now()}.${ext}`);
-      const snapshot = await uploadBytes(storageRef, fileBlob);
-      const downloadURL = await getDownloadURL(snapshot.ref);
+      setPipelineStatus(
+        capturedItems.length > 1
+          ? `Uploading ${capturedItems.length} files securely...`
+          : "Uploading media securely..."
+      );
+
+      const uploadedMedia = await Promise.all(
+        capturedItems.map(async (item) => {
+          const ext = item.mimeType.includes("video") ? "webm" : "jpg";
+          const storageRef = ref(
+            storage,
+            `reports/${currentUserId}/${Date.now()}_${item.id}.${ext}`
+          );
+          const snapshot = await uploadBytes(storageRef, item.blob);
+          const downloadURL = await getDownloadURL(snapshot.ref);
+          return { url: downloadURL, mimeType: item.mimeType };
+        })
+      );
 
       setPipelineStatus("Creating tracking token...");
 
+      // Keep the original single mediaUrl/mediaType fields for backward
+      // compatibility with anything reading the first item, and add the
+      // full array + description + resolved city as new fields.
       const pendingRef = await addDoc(collection(db, "pending_reports"), {
         userId: currentUserId,
-        mediaUrl: downloadURL,
-        mediaType: mimeType,
+        mediaUrl: uploadedMedia[0].url,
+        mediaType: uploadedMedia[0].mimeType,
+        media: uploadedMedia,
+        description: description.trim(),
         status: "processing",
         createdAt: new Date().toISOString(),
-        location: { lat: 30.9045, lng: 77.0967 },
+        location: coords ?? { lat: 30.9045, lng: 77.0967 },
+        cityLabel: cityName ?? null,
       });
 
-      if (base64ForAI) {
-        runBackgroundAI(base64ForAI, pendingRef.id);
+      // Use the first item with a usable base64 frame for the vision AI
+      const aiSource = capturedItems.find((i) => i.base64ForAI);
+      if (aiSource) {
+        runBackgroundAI(aiSource.base64ForAI, pendingRef.id, description.trim());
       } else {
         updateDoc(doc(db, "pending_reports", pendingRef.id), {
           status: "failed",
@@ -171,6 +257,10 @@ export default function Home() {
 
       setPipelineStatus("Queued! Redirecting...");
       triggerHaptic([50, 100]);
+
+      // cleanup local preview URLs
+      capturedItems.forEach((i) => URL.revokeObjectURL(i.previewUrl));
+
       setTimeout(() => {
         router.push("/dashboard");
       }, 800);
@@ -182,7 +272,7 @@ export default function Home() {
   };
 
   // --- BACKGROUND AI RUNNER ---
-  const runBackgroundAI = (base64Img: string, docId: string) => {
+  const runBackgroundAI = (base64Img: string, docId: string, userDescription: string) => {
     const cleanBase64 = base64Img.includes(",")
       ? base64Img.split(",")[1]
       : base64Img;
@@ -193,8 +283,9 @@ export default function Home() {
       body: JSON.stringify({
         image: cleanBase64,
         mimeType: "image/jpeg",
-        lat: 30.9045,
-        lng: 77.0967,
+        lat: coords?.lat ?? 30.9045,
+        lng: coords?.lng ?? 77.0967,
+        description: userDescription,
       }),
       cache: "no-store",
     })
@@ -231,7 +322,7 @@ export default function Home() {
   // ──────────────────────────────────────────────────────────────────────────
 
   return (
-    <main className="w-full max-w-md mx-auto min-h-[100dvh] pb-32 flex flex-col gap-4 px-5 pt-2 bg-[#F7F5F0] dark:bg-[#161616]">
+    <main className="w-full max-w-md mx-auto min-h-[100dvh] flex flex-col gap-4 px-5 pt-2 pb-6 bg-[#F7F5F0] dark:bg-[#161616]">
       <style dangerouslySetInnerHTML={{ __html: `
         @keyframes scan { 0%,100%{transform:translateY(0)} 50%{transform:translateY(160px)} }
         .animate-scan { animation: scan 2.5s cubic-bezier(0.4,0,0.2,1) infinite; }
@@ -247,7 +338,7 @@ export default function Home() {
           {/* Hero card */}
           <div className="rounded-[20px] px-6 py-[22px] relative bg-white dark:bg-[#1e1e1e]">
             <p className="text-[11px] font-semibold tracking-[1.2px] uppercase mb-2 text-[#516B8B] dark:text-[#B6C2D2]">
-              Your city
+              {cityName ? cityName.toUpperCase() : "YOUR CITY"}
             </p>
             <h1 className="text-[28px] font-bold leading-[1.15] tracking-tight text-[#1E293B] dark:text-[#F0F0F0]">
               Spot it.<br />Report it.
@@ -334,6 +425,11 @@ export default function Home() {
                   Recording
                 </div>
               )}
+              {capturedItems.length > 0 && !isRecording && (
+                <div className="absolute top-5 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-md text-white font-bold px-4 py-1.5 rounded-full text-sm z-20">
+                  {capturedItems.length} captured · tap to add more
+                </div>
+              )}
               <div className="flex justify-between w-full">
                 <div className="w-8 h-8 border-b-[2.5px] border-l-[2.5px] border-white/70 rounded-bl-sm" />
                 <div className="w-8 h-8 border-b-[2.5px] border-r-[2.5px] border-white/70 rounded-br-sm" />
@@ -413,7 +509,7 @@ export default function Home() {
                   </span>
                 </button>
 
-                {/* Choose photo */}
+                {/* Choose photo(s) — multiple supported */}
                 <button
                   onClick={() => { triggerHaptic(30); fileInputRef.current?.click(); }}
                   disabled={isProcessing}
@@ -425,7 +521,7 @@ export default function Home() {
                     className="text-[#64748B] dark:text-[rgba(182,194,210,0.7)]"
                     strokeWidth={2} />
                   <span className="text-[14px] font-medium text-[#64748B] dark:text-[rgba(182,194,210,0.7)]">
-                    Choose photo
+                    Choose photos
                   </span>
                 </button>
               </div>
@@ -441,6 +537,7 @@ export default function Home() {
           onChange={handleGalleryUpload}
           accept="image/*,video/*"
           capture="environment"
+          multiple
           className="hidden"
         />
 
@@ -497,6 +594,82 @@ export default function Home() {
               Video
             </button>
           )}
+
+          {/* Done — exits camera, keeps captured items in queue */}
+          {capturedItems.length > 0 && (
+            <button
+              onClick={stopCameraPipeline}
+              className="civic-btn shrink-0 w-[60px] h-[60px] rounded-[18px] flex items-center justify-center
+                bg-[#516B8B] dark:bg-[#B6C2D2]"
+            >
+              <Check size={22} className="text-white dark:text-[#0d1420]" strokeWidth={2.5} />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── CAPTURED MEDIA QUEUE + DESCRIPTION + SUBMIT ── */}
+      {!stream && capturedItems.length > 0 && (
+        <div className="rounded-[20px] p-4 flex flex-col gap-3 bg-white dark:bg-[#1e1e1e]">
+          {/* thumbnail strip */}
+          <div className="flex gap-2.5 overflow-x-auto pb-1">
+            {capturedItems.map((item) => (
+              <div key={item.id} className="relative shrink-0 w-[64px] h-[64px] rounded-[12px] overflow-hidden bg-[#EEF1F6] dark:bg-[#1c2330]">
+                {item.mimeType.startsWith("video/") ? (
+                  <video src={item.previewUrl} className="w-full h-full object-cover" muted />
+                ) : (
+                  <img src={item.previewUrl} className="w-full h-full object-cover" alt="captured issue" />
+                )}
+                {item.mimeType.startsWith("video/") && (
+                  <div className="absolute bottom-1 left-1 bg-black/60 rounded-full p-0.5">
+                    <Video size={10} className="text-white" />
+                  </div>
+                )}
+                <button
+                  onClick={() => removeCapturedItem(item.id)}
+                  className="civic-btn absolute top-1 right-1 w-5 h-5 rounded-full bg-black/55 flex items-center justify-center"
+                >
+                  <Trash2 size={11} className="text-white" />
+                </button>
+              </div>
+            ))}
+
+            {/* add more shortcut */}
+            <button
+              onClick={() => { triggerHaptic(20); fileInputRef.current?.click(); }}
+              disabled={isProcessing}
+              className="civic-btn shrink-0 w-[64px] h-[64px] rounded-[12px] flex items-center justify-center border border-dashed border-[#A3B0C0] dark:border-[rgba(182,194,210,0.35)] disabled:opacity-40"
+            >
+              <Plus size={20} className="text-[#64748B] dark:text-[rgba(182,194,210,0.7)]" />
+            </button>
+          </div>
+
+          {/* description field */}
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            disabled={isProcessing}
+            placeholder="Describe the issue — what's wrong, how long it's been there, anything that helps the AI assess it..."
+            rows={3}
+            className="w-full resize-none rounded-[14px] px-3.5 py-3 text-[14px] leading-snug outline-none
+              bg-[#F7F5F0] dark:bg-[#161616]
+              text-[#1E293B] dark:text-[#F0F0F0]
+              placeholder:text-[#9AA5B1] dark:placeholder:text-[#5b5b5b]
+              border border-[#E2E8F0] dark:border-[#27272A]
+              focus:border-[#516B8B] dark:focus:border-[#B6C2D2]
+              disabled:opacity-50"
+          />
+
+          {/* submit */}
+          <button
+            onClick={submitReport}
+            disabled={isProcessing}
+            className="civic-btn w-full h-[52px] rounded-[14px] flex items-center justify-center gap-2 font-bold text-[15px] text-white disabled:opacity-50
+              bg-[#516B8B] dark:bg-[#B6C2D2] dark:text-[#0d1420]"
+          >
+            <Send size={17} strokeWidth={2.2} />
+            Submit report
+          </button>
         </div>
       )}
     </main>
