@@ -258,7 +258,7 @@ Analyze this image and map it strictly to the provided JSON schema based on thes
         ],
         config: visionConfig,
       }),
-      timeout(15000, "Vision AI took too long to respond.")
+      timeout(35000, "Vision AI took too long to respond.")
     ]);
 
     const [geocodeData, visionResponse] = await Promise.all([geocodePromise, visionPromise]);
@@ -357,7 +357,7 @@ Keep the tone firm, respectful, and unambiguous — this should read as somethin
 
     const draftResponse: any = await Promise.race([
       draftApiCall,
-      timeout(10000, "Drafting AI took too long to respond.")
+      timeout(25000, "Drafting AI took too long to respond.")
     ]);
 
     let agentResult;
