@@ -110,11 +110,6 @@ export default function Home() {
   }, []);
 
   // --- PROACTIVE PERMISSION CHECK ---
-  // FIX: previously this set cameraPermState directly from query results,
-  // and "prompt" (meaning "never asked yet, totally normal") was being
-  // treated the same as a real denial in some code paths. A fresh reset
-  // permission reports as "prompt", not "denied" — that state should NOT
-  // show any warning banner. Only an actual "denied" result should.
   useEffect(() => {
     if (typeof navigator === "undefined" || !("permissions" in navigator)) return;
 
@@ -128,8 +123,7 @@ export default function Home() {
           if (cameraStatus) setCameraPermState(cameraStatus.state);
         };
       } catch {
-        // Permissions API doesn't support 'camera' on this browser/version —
-        // fall back entirely to the reactive getUserMedia error path below.
+        // Permissions API doesn't support 'camera' on this browser/version
       }
     })();
 
@@ -139,22 +133,6 @@ export default function Home() {
   }, []);
 
   // --- CAMERA PIPELINE ---
-  // FIX (camera never even prompting after a permission reset):
-  // The previous version requested { video: { facingMode: "environment" } }.
-  // On some Android/Chrome + device camera combinations, facingMode as a
-  // bare (non-"ideal") constraint is resolved as a HARD constraint during
-  // device enumeration — if the browser can't immediately confirm a back
-  // camera satisfies it, getUserMedia can throw OverconstrainedError before
-  // the permission dialog is ever shown. That perfectly explains "location
-  // prompted fine, camera never prompted at all" — the call was failing at
-  // the constraint-resolution step, before reaching the permission step.
-  //
-  // Fix: request with facingMode as "ideal" (a soft preference, never
-  // blocks on failure to match) on the first attempt. If that still throws,
-  // retry once with NO constraints at all (just { video: true }), which is
-  // the most universally compatible request and will reliably trigger the
-  // permission prompt on a fresh/reset permission state. Only if both
-  // attempts fail do we surface a real error.
   const startCameraPipeline = async () => {
     triggerHaptic(30);
     setError(null);
@@ -181,7 +159,6 @@ export default function Home() {
     };
 
     try {
-      // Attempt 1: prefer the back camera, but don't hard-require it.
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: { ideal: "environment" } },
         audio: false,
@@ -189,18 +166,14 @@ export default function Home() {
       attachStream(mediaStream);
       return;
     } catch (firstErr: any) {
-      console.warn("Camera attempt 1 (ideal back camera) failed:", firstErr?.name, firstErr?.message);
+      console.warn("Camera attempt 1 failed:", firstErr?.name, firstErr?.message);
 
-      // If the user explicitly denied permission, retrying won't help —
-      // surface that immediately rather than prompting twice.
       if (firstErr?.name === "NotAllowedError" || firstErr?.name === "SecurityError") {
         setCameraError("denied");
         setCameraPermState("denied");
         return;
       }
 
-      // Any other failure (most commonly OverconstrainedError from the
-      // facingMode constraint) — retry with the simplest possible request.
       try {
         const fallbackStream = await navigator.mediaDevices.getUserMedia({
           video: true,
@@ -209,7 +182,7 @@ export default function Home() {
         attachStream(fallbackStream);
         return;
       } catch (secondErr: any) {
-        console.warn("Camera attempt 2 (no constraints) failed:", secondErr?.name, secondErr?.message);
+        console.warn("Camera attempt 2 failed:", secondErr?.name, secondErr?.message);
         if (secondErr?.name === "NotAllowedError" || secondErr?.name === "SecurityError") {
           setCameraError("denied");
           setCameraPermState("denied");
@@ -442,37 +415,8 @@ export default function Home() {
     }
   })();
 
-  // ─── COLOUR TOKENS ────────────────────────────────────────────────────────
-  // Light:  page #F7F5F0 · card #FFFFFF · icon-pill #E8EBF0
-  //         text-primary #1E293B · text-muted #64748B
-  //         accent #516B8B · accent-tint #EEF1F6
-  // Dark:   page #161616 · card #1e1e1e · icon-pill #1c2330
-  //         text-primary #F0F0F0 · text-muted #555555
-  //         accent #B6C2D2 · accent-tint #1c2330
-  // ──────────────────────────────────────────────────────────────────────────
-
   return (
-    /*
-      FIX (blank black void on tall phones below the scanner card):
-      Previously <main> just used flex flex-col with no height target — its
-      content (hero + stats + scanner) rendered at its natural height and
-      stopped. On a phone taller than the content needed, the leftover
-      space below was just <body>'s raw background showing through,
-      which is much darker than the card surfaces (#09090B vs #1e1e1e),
-      producing the jarring void in the screenshot.
-
-      Fix: give <main> a min-height tied to the real available viewport —
-      100dvh minus the sticky top nav (h-20 = 80px in layout.tsx) minus the
-      bottom nav clearance already reserved in NavigationWrapper
-      (pb-[92px] = 76px nav + 16px breathing room) — then use
-      justify-center so on tall screens with leftover room, the existing
-      content block centers vertically as a group instead of stopping at
-      the top and exposing empty space below. On shorter screens where
-      content already fills/exceeds that height, this has no visible
-      effect — it only activates the extra space that would otherwise be
-      blank.
-    */
-    <main className="w-full max-w-md mx-auto flex flex-col justify-center gap-4 px-5 pt-2 pb-6 min-h-[calc(100dvh-80px-92px)] bg-[#F7F5F0] dark:bg-[#161616]">
+    <main className="w-full max-w-md mx-auto flex flex-col gap-6 px-5 pt-6 pb-12 min-h-screen sm:min-h-[calc(100dvh-80px-92px)] bg-[#F7F5F0] dark:bg-[#161616]">
       <style dangerouslySetInnerHTML={{ __html: `
         @keyframes scan { 0%,100%{transform:translateY(0)} 50%{transform:translateY(160px)} }
         .animate-scan { animation: scan 2.5s cubic-bezier(0.4,0,0.2,1) infinite; }
@@ -485,7 +429,7 @@ export default function Home() {
       {/* ── HERO + STATS (hidden when camera active) ── */}
       {!stream && (
         <>
-          <div className="rounded-[20px] px-6 py-[22px] relative bg-white dark:bg-[#1e1e1e]">
+          <div className="rounded-[20px] px-6 py-[22px] relative bg-white dark:bg-[#1e1e1e] shadow-sm">
             <div className="flex items-center gap-1.5 mb-2">
               <p className="text-[11px] font-semibold tracking-[1.2px] uppercase text-[#516B8B] dark:text-[#B6C2D2]">
                 {cityName ? cityName.toUpperCase() : "YOUR CITY"}
@@ -525,8 +469,8 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2.5">
-            <div className="rounded-[16px] p-4 flex items-center gap-3 bg-white dark:bg-[#1e1e1e]">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-[16px] p-4 flex items-center gap-3 bg-white dark:bg-[#1e1e1e] shadow-sm">
               <div className="w-[38px] h-[38px] rounded-[12px] flex items-center justify-center shrink-0 bg-[#EEF1F6] dark:bg-[#1c2330]">
                 <TrendingUp size={18} className="text-[#516B8B] dark:text-[#B6C2D2]" strokeWidth={2} />
               </div>
@@ -543,7 +487,7 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="rounded-[16px] p-4 flex items-center gap-3 bg-white dark:bg-[#1e1e1e]">
+            <div className="rounded-[16px] p-4 flex items-center gap-3 bg-white dark:bg-[#1e1e1e] shadow-sm">
               <div className="w-[38px] h-[38px] rounded-[12px] flex items-center justify-center shrink-0 bg-[#EEF1F6] dark:bg-[#1c2330]">
                 <Check size={18} className="text-[#516B8B] dark:text-[#B6C2D2]" strokeWidth={2.5} />
               </div>
@@ -564,8 +508,8 @@ export default function Home() {
       {/* ── SCANNER / CAMERA ZONE ── */}
       <div
         className={`relative w-full ${
-          stream ? "h-[60vh]" : "min-h-[200px]"
-        } rounded-[20px] overflow-hidden flex flex-col items-center justify-center transition-all duration-300 bg-white dark:bg-[#1e1e1e]`}
+          stream ? "h-[65vh]" : "min-h-[240px]"
+        } rounded-[20px] overflow-hidden flex flex-col items-center justify-center transition-all duration-300 bg-white dark:bg-[#1e1e1e] shadow-sm`}
       >
         {stream ? (
           <>
@@ -623,8 +567,8 @@ export default function Home() {
             )}
           </>
         ) : (
-          <div className="flex flex-col items-center justify-center gap-0 px-6 pb-6 pt-7 w-full">
-            <div className="w-24 h-24 rounded-full flex items-center justify-center mb-[18px] border border-[#D4DAE4] dark:border-[rgba(182,194,210,0.15)]">
+          <div className="flex flex-col items-center justify-center gap-0 px-6 pb-6 pt-8 w-full">
+            <div className="w-24 h-24 rounded-full flex items-center justify-center mb-5 border border-[#D4DAE4] dark:border-[rgba(182,194,210,0.15)]">
               <div className="w-[72px] h-[72px] rounded-full flex items-center justify-center border border-[#C2CAD6] dark:border-[rgba(182,194,210,0.25)]">
                 <div className="w-[50px] h-[50px] rounded-full flex items-center justify-center bg-[#EEF1F6] dark:bg-[#1c2330] border border-[#516B8B] dark:border-[#B6C2D2]">
                   <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
@@ -642,12 +586,12 @@ export default function Home() {
               </div>
             </div>
 
-            <p className="text-[13px] font-medium mb-1 text-center text-[#64748B] dark:text-[#555]">
+            <p className="text-[13px] font-medium mb-1.5 text-center text-[#64748B] dark:text-[#555]">
               {isProcessing ? pipelineStatus : "Aim at any civic issue to report it"}
             </p>
 
             {!isProcessing && !cameraError && (
-              <div className="flex items-center gap-[5px] mb-[18px]">
+              <div className="flex items-center gap-[5px] mb-5">
                 <span className="w-[6px] h-[6px] rounded-full inline-block bg-[#516B8B] dark:bg-[#B6C2D2]" />
                 <span className="text-[11px] font-medium tracking-[0.3px] text-[#516B8B] dark:text-[#B6C2D2]">
                   Camera ready
@@ -655,16 +599,8 @@ export default function Home() {
               </div>
             )}
 
-            {/*
-              FIX: only show this banner for an actual confirmed "denied"
-              state. "prompt" (never asked / freshly reset) must NOT trigger
-              this warning — that was incorrectly conflating "haven't asked
-              yet" with "user said no," which made a freshly reset
-              permission look broken before the user even got a chance to
-              tap the button.
-            */}
             {cameraPermState === "denied" && !cameraError && (
-              <div className="w-full mb-3 rounded-[12px] px-3.5 py-3 flex gap-2 bg-[#FFF7ED] dark:bg-[#2A1F12] border border-[#FDBA74]/50 dark:border-[#92400E]/50">
+              <div className="w-full mb-4 rounded-[12px] px-3.5 py-3 flex gap-2 bg-[#FFF7ED] dark:bg-[#2A1F12] border border-[#FDBA74]/50 dark:border-[#92400E]/50">
                 <AlertCircle size={15} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
                 <div className="text-[12px] leading-snug text-amber-700 dark:text-amber-400">
                   Camera access is currently turned off for this site.
@@ -675,7 +611,7 @@ export default function Home() {
             )}
 
             {cameraErrorMessage && (
-              <div className="w-full mb-3 rounded-[12px] px-3.5 py-3 flex gap-2 bg-[#FEF2F2] dark:bg-[#2A1717] border border-[#FCA5A5]/50 dark:border-[#7F1D1D]/50">
+              <div className="w-full mb-4 rounded-[12px] px-3.5 py-3 flex gap-2 bg-[#FEF2F2] dark:bg-[#2A1717] border border-[#FCA5A5]/50 dark:border-[#7F1D1D]/50">
                 <AlertCircle size={15} className="text-red-500 dark:text-red-400 shrink-0 mt-0.5" />
                 <p className="text-[12px] leading-snug text-red-600 dark:text-red-400">
                   {cameraErrorMessage}
@@ -684,13 +620,13 @@ export default function Home() {
             )}
 
             {error && (
-              <p className="text-[12px] font-semibold text-red-500 dark:text-red-400 mb-3">
+              <p className="text-[12px] font-semibold text-red-500 dark:text-red-400 mb-4">
                 {error}
               </p>
             )}
 
             {!isProcessing && (
-              <div className="grid grid-cols-2 gap-2.5 w-full">
+              <div className="grid grid-cols-2 gap-3 w-full">
                 <button
                   onClick={startCameraPipeline}
                   disabled={isProcessing}
@@ -800,7 +736,7 @@ export default function Home() {
 
       {/* ── CAPTURED MEDIA QUEUE + DESCRIPTION + SUBMIT ── */}
       {!stream && capturedItems.length > 0 && (
-        <div className="rounded-[20px] p-4 flex flex-col gap-3 bg-white dark:bg-[#1e1e1e]">
+        <div className="rounded-[20px] p-4 flex flex-col gap-4 bg-white dark:bg-[#1e1e1e] shadow-sm">
           <div className="flex gap-2.5 overflow-x-auto pb-1">
             {capturedItems.map((item) => (
               <div key={item.id} className="relative shrink-0 w-[64px] h-[64px] rounded-[12px] overflow-hidden bg-[#EEF1F6] dark:bg-[#1c2330]">
