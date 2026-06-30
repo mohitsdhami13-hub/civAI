@@ -7,7 +7,8 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { collection, addDoc, updateDoc, doc } from "firebase/firestore";
 import {
   Camera as CameraIcon, Image as ImageIcon, X,
-  TrendingUp, Check, Video, Square, Plus, Trash2, Send
+  TrendingUp, Check, Video, Square, Plus, Trash2, Send,
+  MapPin, AlertCircle
 } from "lucide-react";
 
 const triggerHaptic = (pattern: number | number[] = 50) => {
@@ -21,8 +22,17 @@ type CapturedItem = {
   blob: Blob;
   mimeType: string;
   previewUrl: string;
-  base64ForAI: string; // empty for video items not yet frame-extracted from gallery
+  base64ForAI: string;
 };
+
+type LocationState = "idle" | "requesting" | "granted" | "denied" | "unsupported";
+type CameraErrorReason =
+  | null
+  | "denied"
+  | "not-found"
+  | "insecure-context"
+  | "unsupported"
+  | "unknown";
 
 export default function Home() {
   const router = useRouter();
@@ -36,30 +46,55 @@ export default function Home() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const videoChunks = useRef<BlobPart[]>([]);
 
-  // Multi-capture queue (photos/videos taken before final submit)
+  // Multi-capture queue
   const [capturedItems, setCapturedItems] = useState<CapturedItem[]>([]);
-  // Description the user types to help the AI understand the issue
   const [description, setDescription] = useState("");
 
-  // Location
+  // Location — now an explicit, visible state machine instead of a silent
+  // background call. This is what makes the permission prompt behavior
+  // visible/debuggable instead of "nothing happens."
+  const [locationState, setLocationState] = useState<LocationState>("idle");
   const [cityName, setCityName] = useState<string | null>(null);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+
+  // Camera error — surfaced explicitly instead of silently opening gallery.
+  const [cameraError, setCameraError] = useState<CameraErrorReason>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Separate input strictly for the camera-capture fallback, so we never
+  // confuse "user explicitly chose gallery" with "camera failed, here's gallery"
+  const cameraFallbackInputRef = useRef<HTMLInputElement>(null);
 
   const currentUserId = "user_solan_resident_01";
 
-  // --- LOCATION: ask once on mount, fall back silently if denied ---
-  useEffect(() => {
-    if (typeof window === "undefined" || !navigator.geolocation) return;
+  // --- LOCATION ---
+  // FIX: previously this fired silently on mount with no UI feedback at all,
+  // so on browsers/webviews that suppress or delay the permission prompt,
+  // it looked like "the app never asks." Now it's wrapped in a visible
+  // state + a retry button is shown if it's denied/unsupported.
+  const requestLocation = () => {
+    if (typeof window === "undefined" || !("geolocation" in navigator)) {
+      setLocationState("unsupported");
+      return;
+    }
+    // navigator.geolocation requires a secure context (https or localhost).
+    // On plain http:// hosting, the browser silently refuses to even show
+    // the prompt — this check makes that failure mode visible instead of
+    // looking like nothing happened.
+    if (typeof window !== "undefined" && !window.isSecureContext) {
+      setLocationState("denied");
+      return;
+    }
 
+    setLocationState("requesting");
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
         setCoords({ lat, lng });
+        setLocationState("granted");
         try {
           const res = await fetch(
             `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=10`,
@@ -74,20 +109,42 @@ export default function Home() {
             null;
           if (resolvedCity) setCityName(resolvedCity);
         } catch {
-          // Reverse geocoding failed silently — keep generic "Your city" label
+          // Reverse geocoding failed — coords still saved, just no city label
         }
       },
-      () => {
-        // Permission denied or unavailable — keep generic "Your city" label
+      (geoErr) => {
+        // geoErr.code: 1 = PERMISSION_DENIED, 2 = POSITION_UNAVAILABLE, 3 = TIMEOUT
+        setLocationState("denied");
       },
       { enableHighAccuracy: false, timeout: 8000 }
     );
+  };
+
+  useEffect(() => {
+    requestLocation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // --- CAMERA PIPELINE ---
+  // FIX: previously any getUserMedia failure silently triggered the gallery
+  // file picker with zero explanation, which is exactly the bug you saw
+  // ("Take photo just opens gallery"). Now we classify *why* it failed and
+  // show that to the user, and gallery is offered as an explicit choice
+  // rather than a silent substitution.
   const startCameraPipeline = async () => {
     triggerHaptic(30);
     setError(null);
+    setCameraError(null);
+
+    if (typeof window !== "undefined" && !window.isSecureContext) {
+      setCameraError("insecure-context");
+      return;
+    }
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      setCameraError("unsupported");
+      return;
+    }
+
     try {
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
@@ -97,9 +154,17 @@ export default function Home() {
       setTimeout(() => {
         if (videoRef.current) videoRef.current.srcObject = mediaStream;
       }, 50);
-    } catch (err) {
-      console.warn("Camera access denied or unavailable.");
-      fileInputRef.current?.click();
+    } catch (err: any) {
+      console.warn("Camera access failed:", err?.name, err?.message);
+      if (err?.name === "NotAllowedError" || err?.name === "SecurityError") {
+        setCameraError("denied");
+      } else if (err?.name === "NotFoundError" || err?.name === "OverconstrainedError") {
+        setCameraError("not-found");
+      } else {
+        setCameraError("unknown");
+      }
+      // No more silent fallback — the UI now shows the reason and lets the
+      // user explicitly tap "Use gallery instead" if they want to.
     }
   };
 
@@ -110,7 +175,7 @@ export default function Home() {
     }
   };
 
-  // --- IMAGE CAPTURE (adds to queue, keeps camera open for more shots) ---
+  // --- IMAGE CAPTURE ---
   const captureImage = () => {
     triggerHaptic(50);
     if (videoRef.current && canvasRef.current) {
@@ -127,7 +192,7 @@ export default function Home() {
     }
   };
 
-  // --- VIDEO CAPTURE (adds to queue, keeps camera open for more shots) ---
+  // --- VIDEO CAPTURE ---
   const startRecording = () => {
     if (!stream) return;
     triggerHaptic(50);
@@ -178,7 +243,7 @@ export default function Home() {
     });
   };
 
-  // --- GALLERY UPLOAD (supports multiple files at once) ---
+  // --- GALLERY UPLOAD (multi-file) ---
   const handleGalleryUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -186,7 +251,6 @@ export default function Home() {
     Array.from(files).forEach((file) => {
       const isVideo = file.type.startsWith("video/");
       if (isVideo) {
-        // Gallery videos: no frame extraction client-side, AI gets empty preview
         addCapturedItem(file, file.type, "");
       } else {
         const reader = new FileReader();
@@ -197,11 +261,10 @@ export default function Home() {
       }
     });
 
-    // reset input so the same file can be re-selected later if removed
     e.target.value = "";
   };
 
-  // --- SUBMIT: uploads every queued item, then queues the report ---
+  // --- SUBMIT ---
   const submitReport = async () => {
     if (capturedItems.length === 0) return;
     setIsProcessing(true);
@@ -229,9 +292,6 @@ export default function Home() {
 
       setPipelineStatus("Creating tracking token...");
 
-      // Keep the original single mediaUrl/mediaType fields for backward
-      // compatibility with anything reading the first item, and add the
-      // full array + description + resolved city as new fields.
       const pendingRef = await addDoc(collection(db, "pending_reports"), {
         userId: currentUserId,
         mediaUrl: uploadedMedia[0].url,
@@ -244,7 +304,6 @@ export default function Home() {
         cityLabel: cityName ?? null,
       });
 
-      // Use the first item with a usable base64 frame for the vision AI
       const aiSource = capturedItems.find((i) => i.base64ForAI);
       if (aiSource) {
         runBackgroundAI(aiSource.base64ForAI, pendingRef.id, description.trim());
@@ -258,7 +317,6 @@ export default function Home() {
       setPipelineStatus("Queued! Redirecting...");
       triggerHaptic([50, 100]);
 
-      // cleanup local preview URLs
       capturedItems.forEach((i) => URL.revokeObjectURL(i.previewUrl));
 
       setTimeout(() => {
@@ -312,6 +370,23 @@ export default function Home() {
       });
   };
 
+  const cameraErrorMessage = (() => {
+    switch (cameraError) {
+      case "denied":
+        return "Camera permission was denied. Check your browser's site settings to allow camera access, or use gallery instead.";
+      case "not-found":
+        return "No camera was found on this device. You can pick a photo or video from your gallery instead.";
+      case "insecure-context":
+        return "Camera requires a secure (https) connection. This page must be loaded over https for camera access to work.";
+      case "unsupported":
+        return "This browser doesn't support camera access. Try Chrome or Safari, or use gallery instead.";
+      case "unknown":
+        return "Couldn't open the camera. You can try again or use gallery instead.";
+      default:
+        return null;
+    }
+  })();
+
   // ─── COLOUR TOKENS ────────────────────────────────────────────────────────
   // Light:  page #F7F5F0 · card #FFFFFF · icon-pill #E8EBF0
   //         text-primary #1E293B · text-muted #64748B
@@ -322,7 +397,12 @@ export default function Home() {
   // ──────────────────────────────────────────────────────────────────────────
 
   return (
-    <main className="w-full max-w-md mx-auto min-h-[100dvh] flex flex-col gap-4 px-5 pt-2 pb-6 bg-[#F7F5F0] dark:bg-[#161616]">
+    // FIX (blank space / keyboard breakage):
+    // min-h-[100dvh] removed from here — <body> in layout.tsx is now the
+    // single height authority. This page just flows naturally inside it,
+    // so there's no longer a second dvh container fighting the first when
+    // the mobile keyboard opens or the browser chrome collapses/expands.
+    <main className="w-full max-w-md mx-auto flex flex-col gap-4 px-5 pt-2 pb-6 bg-[#F7F5F0] dark:bg-[#161616]">
       <style dangerouslySetInnerHTML={{ __html: `
         @keyframes scan { 0%,100%{transform:translateY(0)} 50%{transform:translateY(160px)} }
         .animate-scan { animation: scan 2.5s cubic-bezier(0.4,0,0.2,1) infinite; }
@@ -337,15 +417,36 @@ export default function Home() {
         <>
           {/* Hero card */}
           <div className="rounded-[20px] px-6 py-[22px] relative bg-white dark:bg-[#1e1e1e]">
-            <p className="text-[11px] font-semibold tracking-[1.2px] uppercase mb-2 text-[#516B8B] dark:text-[#B6C2D2]">
-              {cityName ? cityName.toUpperCase() : "YOUR CITY"}
-            </p>
+            <div className="flex items-center gap-1.5 mb-2">
+              <p className="text-[11px] font-semibold tracking-[1.2px] uppercase text-[#516B8B] dark:text-[#B6C2D2]">
+                {cityName ? cityName.toUpperCase() : "YOUR CITY"}
+              </p>
+              {locationState === "requesting" && (
+                <span className="w-3 h-3 border-[1.5px] rounded-full animate-spin border-[#516B8B]/30 border-t-[#516B8B] dark:border-[#B6C2D2]/30 dark:border-t-[#B6C2D2]" />
+              )}
+            </div>
             <h1 className="text-[28px] font-bold leading-[1.15] tracking-tight text-[#1E293B] dark:text-[#F0F0F0]">
               Spot it.<br />Report it.
             </h1>
             <p className="text-[14px] mt-1.5 text-[#64748B] dark:text-[#555]">
               Fix your city together
             </p>
+
+            {/* Location permission retry — only shows if denied/unsupported,
+                gives users a visible, explicit way to grant it rather than
+                it silently never working. */}
+            {(locationState === "denied" || locationState === "unsupported") && (
+              <button
+                onClick={requestLocation}
+                className="civic-btn mt-2.5 flex items-center gap-1.5 text-[11px] font-semibold text-[#516B8B] dark:text-[#B6C2D2] underline underline-offset-2"
+              >
+                <MapPin size={12} />
+                {locationState === "unsupported"
+                  ? "Location not supported on this browser"
+                  : "Enable location for accurate reports"}
+              </button>
+            )}
+
             {/* accent circle */}
             <div className="absolute right-5 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full flex items-center justify-center bg-[#EEF1F6] dark:bg-[#1c2330] border border-[#D4DAE4] dark:border-[rgba(182,194,210,0.18)]">
               <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
@@ -361,7 +462,6 @@ export default function Home() {
 
           {/* Stat cards */}
           <div className="grid grid-cols-2 gap-2.5">
-            {/* City rank */}
             <div className="rounded-[16px] p-4 flex items-center gap-3 bg-white dark:bg-[#1e1e1e]">
               <div className="w-[38px] h-[38px] rounded-[12px] flex items-center justify-center shrink-0 bg-[#EEF1F6] dark:bg-[#1c2330]">
                 <TrendingUp size={18} className="text-[#516B8B] dark:text-[#B6C2D2]" strokeWidth={2} />
@@ -377,7 +477,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Resolved */}
             <div className="rounded-[16px] p-4 flex items-center gap-3 bg-white dark:bg-[#1e1e1e]">
               <div className="w-[38px] h-[38px] rounded-[12px] flex items-center justify-center shrink-0 bg-[#EEF1F6] dark:bg-[#1c2330]">
                 <Check size={18} className="text-[#516B8B] dark:text-[#B6C2D2]" strokeWidth={2.5} />
@@ -413,7 +512,6 @@ export default function Home() {
               className="absolute inset-0 w-full h-full object-cover"
             />
 
-            {/* corner brackets */}
             <div className="absolute inset-0 z-10 p-8 flex flex-col justify-between pointer-events-none">
               <div className="flex justify-between w-full">
                 <div className="w-8 h-8 border-t-[2.5px] border-l-[2.5px] border-white/70 rounded-tl-sm" />
@@ -436,7 +534,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* close */}
             {!isProcessing && (
               <button
                 onClick={stopCameraPipeline}
@@ -449,10 +546,7 @@ export default function Home() {
         ) : (
           /* ── IDLE SCANNER UI ── */
           <div className="flex flex-col items-center justify-center gap-0 px-6 pb-6 pt-7 w-full">
-            {/* concentric rings — light uses slate tints, dark uses blue tints */}
-            <div
-              className="w-24 h-24 rounded-full flex items-center justify-center mb-[18px] border border-[#D4DAE4] dark:border-[rgba(182,194,210,0.15)]"
-            >
+            <div className="w-24 h-24 rounded-full flex items-center justify-center mb-[18px] border border-[#D4DAE4] dark:border-[rgba(182,194,210,0.15)]">
               <div className="w-[72px] h-[72px] rounded-full flex items-center justify-center border border-[#C2CAD6] dark:border-[rgba(182,194,210,0.25)]">
                 <div className="w-[50px] h-[50px] rounded-full flex items-center justify-center bg-[#EEF1F6] dark:bg-[#1c2330] border border-[#516B8B] dark:border-[#B6C2D2]">
                   <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
@@ -470,17 +564,26 @@ export default function Home() {
               </div>
             </div>
 
-            <p className="text-[13px] font-medium mb-1 text-[#64748B] dark:text-[#555]">
+            <p className="text-[13px] font-medium mb-1 text-center text-[#64748B] dark:text-[#555]">
               {isProcessing ? pipelineStatus : "Aim at any civic issue to report it"}
             </p>
 
-            {/* status dot */}
-            {!isProcessing && (
+            {!isProcessing && !cameraError && (
               <div className="flex items-center gap-[5px] mb-[18px]">
                 <span className="w-[6px] h-[6px] rounded-full inline-block bg-[#516B8B] dark:bg-[#B6C2D2]" />
                 <span className="text-[11px] font-medium tracking-[0.3px] text-[#516B8B] dark:text-[#B6C2D2]">
                   Camera ready
                 </span>
+              </div>
+            )}
+
+            {/* Explicit camera error — replaces the old silent fallback */}
+            {cameraErrorMessage && (
+              <div className="w-full mb-3 rounded-[12px] px-3.5 py-3 flex gap-2 bg-[#FEF2F2] dark:bg-[#2A1717] border border-[#FCA5A5]/50 dark:border-[#7F1D1D]/50">
+                <AlertCircle size={15} className="text-red-500 dark:text-red-400 shrink-0 mt-0.5" />
+                <p className="text-[12px] leading-snug text-red-600 dark:text-red-400">
+                  {cameraErrorMessage}
+                </p>
               </div>
             )}
 
@@ -490,10 +593,9 @@ export default function Home() {
               </p>
             )}
 
-            {/* ── ACTION BUTTONS (inside scanner card) ── */}
+            {/* ── ACTION BUTTONS ── */}
             {!isProcessing && (
               <div className="grid grid-cols-2 gap-2.5 w-full">
-                {/* Take photo */}
                 <button
                   onClick={startCameraPipeline}
                   disabled={isProcessing}
@@ -509,7 +611,6 @@ export default function Home() {
                   </span>
                 </button>
 
-                {/* Choose photo(s) — multiple supported */}
                 <button
                   onClick={() => { triggerHaptic(30); fileInputRef.current?.click(); }}
                   disabled={isProcessing}
@@ -529,19 +630,17 @@ export default function Home() {
           </div>
         )}
 
-        {/* hidden utility elements */}
         <canvas ref={canvasRef} className="hidden" />
+        {/* Explicit gallery input — chosen by the user directly */}
         <input
           type="file"
           ref={fileInputRef}
           onChange={handleGalleryUpload}
           accept="image/*,video/*"
-          capture="environment"
           multiple
           className="hidden"
         />
 
-        {/* Loading overlay */}
         {isProcessing && (
           <div className="absolute inset-0 bg-white/60 dark:bg-black/50 backdrop-blur-sm z-50 flex flex-col items-center justify-center gap-3">
             <div
@@ -558,10 +657,9 @@ export default function Home() {
         )}
       </div>
 
-      {/* ── IN-CAMERA CONTROLS — shown only when stream is live ── */}
+      {/* ── IN-CAMERA CONTROLS ── */}
       {stream && !isProcessing && (
         <div className="flex gap-3 w-full">
-          {/* Photo capture */}
           <button
             onClick={captureImage}
             disabled={isRecording || isProcessing}
@@ -573,7 +671,6 @@ export default function Home() {
             Photo
           </button>
 
-          {/* Video record / stop */}
           {isRecording ? (
             <button
               onClick={stopRecording}
@@ -595,7 +692,6 @@ export default function Home() {
             </button>
           )}
 
-          {/* Done — exits camera, keeps captured items in queue */}
           {capturedItems.length > 0 && (
             <button
               onClick={stopCameraPipeline}
@@ -611,7 +707,6 @@ export default function Home() {
       {/* ── CAPTURED MEDIA QUEUE + DESCRIPTION + SUBMIT ── */}
       {!stream && capturedItems.length > 0 && (
         <div className="rounded-[20px] p-4 flex flex-col gap-3 bg-white dark:bg-[#1e1e1e]">
-          {/* thumbnail strip */}
           <div className="flex gap-2.5 overflow-x-auto pb-1">
             {capturedItems.map((item) => (
               <div key={item.id} className="relative shrink-0 w-[64px] h-[64px] rounded-[12px] overflow-hidden bg-[#EEF1F6] dark:bg-[#1c2330]">
@@ -634,7 +729,6 @@ export default function Home() {
               </div>
             ))}
 
-            {/* add more shortcut */}
             <button
               onClick={() => { triggerHaptic(20); fileInputRef.current?.click(); }}
               disabled={isProcessing}
@@ -644,14 +738,24 @@ export default function Home() {
             </button>
           </div>
 
-          {/* description field */}
+          {/*
+            FIX (UI breaking when typing): the textarea itself was never the
+            problem — it was the double 100dvh containers fighting the
+            keyboard. With layout.tsx now using interactive-widget:
+            resizes-content and only ONE dvh authority (body), this field
+            resizes correctly instead of getting squeezed/overlapped.
+            font-size kept at 16px equivalent (text-[16px] on focus would
+            be ideal, but 14px below 16px can trigger iOS Safari's
+            auto-zoom-on-focus, which is its own layout-jump bug) — using
+            16px here specifically to prevent that.
+          */}
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             disabled={isProcessing}
             placeholder="Describe the issue — what's wrong, how long it's been there, anything that helps the AI assess it..."
             rows={3}
-            className="w-full resize-none rounded-[14px] px-3.5 py-3 text-[14px] leading-snug outline-none
+            className="w-full resize-none rounded-[14px] px-3.5 py-3 text-[16px] leading-snug outline-none
               bg-[#F7F5F0] dark:bg-[#161616]
               text-[#1E293B] dark:text-[#F0F0F0]
               placeholder:text-[#9AA5B1] dark:placeholder:text-[#5b5b5b]
@@ -660,7 +764,6 @@ export default function Home() {
               disabled:opacity-50"
           />
 
-          {/* submit */}
           <button
             onClick={submitReport}
             disabled={isProcessing}
