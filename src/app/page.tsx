@@ -59,6 +59,15 @@ export default function Home() {
 
   // Camera error — surfaced explicitly instead of silently opening gallery.
   const [cameraError, setCameraError] = useState<CameraErrorReason>(null);
+  // Tracks whether the live <video> actually has frames yet, separate from
+  // "stream exists." This closes the gap where the 60vh box appeared
+  // instantly but stayed blank for a beat while the camera warmed up.
+  const [videoReady, setVideoReady] = useState(false);
+  // Proactive permission state read via the Permissions API where supported,
+  // so we can warn the user *before* they tap "Take photo" if Chrome has
+  // already silently revoked a previously-granted permission (the
+  // auto-cancel behavior described). null = unknown/unsupported API.
+  const [cameraPermState, setCameraPermState] = useState<PermissionState | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -125,6 +134,39 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // --- PROACTIVE PERMISSION CHECK ---
+  // Chrome on Android silently auto-revokes camera/mic permission for sites
+  // that are dismissed/ignored repeatedly ("abusive permission" heuristics)
+  // or unused for a while. When that happens, getUserMedia() just throws
+  // NotAllowedError again with zero warning beforehand. Polling
+  // navigator.permissions.query lets us catch that *before* the user taps
+  // the button, so we can show a calmer, more specific prompt instead of
+  // them hitting a wall and having to dig through Chrome settings blind.
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("permissions" in navigator)) return;
+
+    let cameraStatus: PermissionStatus | null = null;
+
+    (async () => {
+      try {
+        // 'camera' isn't in the TS lib.dom PermissionName union in all
+        // versions, hence the cast — it is supported in Chrome.
+        cameraStatus = await navigator.permissions.query({ name: "camera" as PermissionName });
+        setCameraPermState(cameraStatus.state);
+        cameraStatus.onchange = () => {
+          if (cameraStatus) setCameraPermState(cameraStatus.state);
+        };
+      } catch {
+        // Permissions API doesn't support 'camera' on this browser — silently
+        // fall back to the reactive getUserMedia error path instead.
+      }
+    })();
+
+    return () => {
+      if (cameraStatus) cameraStatus.onchange = null;
+    };
+  }, []);
+
   // --- CAMERA PIPELINE ---
   // FIX: previously any getUserMedia failure silently triggered the gallery
   // file picker with zero explanation, which is exactly the bug you saw
@@ -135,6 +177,7 @@ export default function Home() {
     triggerHaptic(30);
     setError(null);
     setCameraError(null);
+    setVideoReady(false);
 
     if (typeof window !== "undefined" && !window.isSecureContext) {
       setCameraError("insecure-context");
@@ -151,20 +194,29 @@ export default function Home() {
         audio: false,
       });
       setStream(mediaStream);
-      setTimeout(() => {
-        if (videoRef.current) videoRef.current.srcObject = mediaStream;
-      }, 50);
+      // FIX (blank 60vh box): previously a blind setTimeout(50) attached
+      // srcObject and hoped for the best, so the box jumped to 60vh
+      // instantly while staying visually empty until the camera warmed
+      // up. Now we attach srcObject as soon as the ref exists, and flip
+      // videoReady only once the video element actually reports it has
+      // dimensions/frames (onloadedmetadata), so the UI can show a
+      // spinner during that gap instead of a blank card.
+      requestAnimationFrame(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = mediaStream;
+          videoRef.current.onloadedmetadata = () => setVideoReady(true);
+        }
+      });
     } catch (err: any) {
       console.warn("Camera access failed:", err?.name, err?.message);
       if (err?.name === "NotAllowedError" || err?.name === "SecurityError") {
         setCameraError("denied");
+        setCameraPermState("denied");
       } else if (err?.name === "NotFoundError" || err?.name === "OverconstrainedError") {
         setCameraError("not-found");
       } else {
         setCameraError("unknown");
       }
-      // No more silent fallback — the UI now shows the reason and lets the
-      // user explicitly tap "Use gallery instead" if they want to.
     }
   };
 
@@ -173,6 +225,7 @@ export default function Home() {
       stream.getTracks().forEach((track) => track.stop());
       setStream(null);
     }
+    setVideoReady(false);
   };
 
   // --- IMAGE CAPTURE ---
@@ -429,7 +482,7 @@ export default function Home() {
               Spot it.<br />Report it.
             </h1>
             <p className="text-[14px] mt-1.5 text-[#64748B] dark:text-[#555]">
-              Fix your city together
+              {cityName ? `Fix ${cityName} together` : "Fix your city together"}
             </p>
 
             {/* Location permission retry — only shows if denied/unsupported,
@@ -470,7 +523,9 @@ export default function Home() {
                 <p className="text-[20px] font-bold leading-none tracking-tight text-[#1E293B] dark:text-[#F0F0F0]">
                   #12
                 </p>
-                <p className="text-[12px] mt-1 text-[#64748B] dark:text-[#555]">City rank</p>
+                <p className="text-[12px] mt-1 text-[#64748B] dark:text-[#555]">
+                  {cityName ? `${cityName} rank` : "City rank"}
+                </p>
                 <p className="text-[11px] font-semibold text-[#516B8B] dark:text-[#B6C2D2]">
                   ↑ 3 this week
                 </p>
@@ -496,6 +551,15 @@ export default function Home() {
       )}
 
       {/* ── SCANNER / CAMERA ZONE ── */}
+      {/*
+        FIX (blank space before camera actually shows anything):
+        Previously this jumped straight from min-h-[200px] to a fixed
+        h-[60vh] the instant `stream` was set, but the <video> had no
+        frames yet for a beat — so users saw an empty 60vh box. Now the
+        height transition is the same, but we render a spinner overlay
+        for that exact gap (stream exists but videoReady is false), so
+        there's never a moment of "blank" — only idle, loading, or live.
+      */}
       <div
         className={`relative w-full ${
           stream ? "h-[60vh]" : "min-h-[200px]"
@@ -509,8 +573,23 @@ export default function Home() {
               autoPlay
               playsInline
               muted
-              className="absolute inset-0 w-full h-full object-cover"
+              className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-200 ${
+                videoReady ? "opacity-100" : "opacity-0"
+              }`}
             />
+
+            {/* Camera warming up — fills the gap instead of a blank box */}
+            {!videoReady && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10">
+                <div
+                  className="w-9 h-9 border-[3px] rounded-full animate-spin"
+                  style={{ borderColor: "rgba(81,107,139,0.2)", borderTopColor: "#516B8B" }}
+                />
+                <span className="text-[12px] font-medium text-[#64748B] dark:text-[#999]">
+                  Starting camera...
+                </span>
+              </div>
+            )}
 
             <div className="absolute inset-0 z-10 p-8 flex flex-col justify-between pointer-events-none">
               <div className="flex justify-between w-full">
@@ -523,7 +602,7 @@ export default function Home() {
                   Recording
                 </div>
               )}
-              {capturedItems.length > 0 && !isRecording && (
+              {capturedItems.length > 0 && !isRecording && videoReady && (
                 <div className="absolute top-5 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-md text-white font-bold px-4 py-1.5 rounded-full text-sm z-20">
                   {capturedItems.length} captured · tap to add more
                 </div>
@@ -574,6 +653,25 @@ export default function Home() {
                 <span className="text-[11px] font-medium tracking-[0.3px] text-[#516B8B] dark:text-[#B6C2D2]">
                   Camera ready
                 </span>
+              </div>
+            )}
+
+            {/*
+              Proactive warning — Chrome on Android sometimes auto-revokes
+              a previously granted camera permission (after repeated
+              dismissals or inactivity). Without this, the user taps "Take
+              photo," nothing happens or it silently fails, and they have
+              no idea they need to dig through Chrome's site settings. This
+              catches that state ahead of time via the Permissions API.
+            */}
+            {cameraPermState === "denied" && !cameraError && (
+              <div className="w-full mb-3 rounded-[12px] px-3.5 py-3 flex gap-2 bg-[#FFF7ED] dark:bg-[#2A1F12] border border-[#FDBA74]/50 dark:border-[#92400E]/50">
+                <AlertCircle size={15} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <div className="text-[12px] leading-snug text-amber-700 dark:text-amber-400">
+                  Camera access was turned off, likely by Chrome automatically.
+                  Tap the lock/info icon in your address bar → Permissions →
+                  turn Camera back on, then return here.
+                </div>
               </div>
             )}
 
