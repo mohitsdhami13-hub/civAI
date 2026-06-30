@@ -9,6 +9,26 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const timeout = (ms: number, message: string = "Request timed out") =>
   new Promise<never>((_, reject) => setTimeout(() => reject(new Error(message)), ms));
 
+// Retry once on 503 "High Demand" with a 2s delay before giving up.
+// gemini-3.5-flash can hit transient demand spikes; one retry resolves
+// the vast majority of them without any UX impact.
+async function withRetry<T>(fn: () => Promise<T>, retries = 1, delayMs = 2000): Promise<T> {
+  try {
+    return await fn();
+  } catch (err: any) {
+    const is503 = err?.message?.includes('503') ||
+                  err?.message?.includes('UNAVAILABLE') ||
+                  err?.message?.includes('High Demand') ||
+                  err?.message?.includes('high demand');
+    if (retries > 0 && is503) {
+      console.warn(`Gemini 503 — retrying in ${delayMs}ms...`);
+      await new Promise(r => setTimeout(r, delayMs));
+      return withRetry(fn, retries - 1, delayMs);
+    }
+    throw err;
+  }
+}
+
 const MAX_IMAGE_SIZE_MB = 30;
 
 const RATE_LIMIT_WINDOW_MS = 60_000;
@@ -244,24 +264,27 @@ ${CIVIC_CATEGORY_PROMPT_LIST}
 
 Analyze this image and map it strictly to the provided JSON schema based on these rules.`;
 
-    const visionPromise = Promise.race([
-      ai.models.generateContent({
-        model: VISION_MODEL,
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { text: strictPrompt },
-              { inlineData: { data: base64String, mimeType: mimeType } },
-            ],
-          },
-        ],
-        config: visionConfig,
-      }),
-      timeout(35000, "Vision AI took too long to respond.")
-    ]);
+    const visionCallFn = () => ai.models.generateContent({
+      model: VISION_MODEL,
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: strictPrompt },
+            { inlineData: { data: base64String, mimeType: mimeType } },
+          ],
+        },
+      ],
+      config: visionConfig,
+    });
 
-    const [geocodeData, visionResponse] = await Promise.all([geocodePromise, visionPromise]);
+    const [geocodeData, visionResponse] = await Promise.all([
+      geocodePromise,
+      Promise.race([
+        withRetry(visionCallFn),
+        timeout(35000, "Vision AI took too long to respond.")
+      ])
+    ]);
     const { addressName, district, state, city } = geocodeData;
 
     let visionData;
@@ -349,14 +372,14 @@ Write the email_body as a genuinely formal grievance letter a citizen could send
 - Close formally, identifying the sender as "A Concerned Resident" filing via the CivicAI platform.
 Keep the tone firm, respectful, and unambiguous — this should read as something that compels a response, not a casual report. Keep formal_complaint and whatsapp_message in the same factual, professional register but more concise for those channels.`;
 
-    const draftApiCall = ai.models.generateContent({
+    const draftCallFn = () => ai.models.generateContent({
       model: VISION_MODEL,
       contents: [{ role: "user", parts: [{ text: draftPrompt }] }],
       config: draftConfig
     });
 
     const draftResponse: any = await Promise.race([
-      draftApiCall,
+      withRetry(draftCallFn),
       timeout(25000, "Drafting AI took too long to respond.")
     ]);
 
