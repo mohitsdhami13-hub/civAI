@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { GoogleMap, useLoadScript, Marker, Circle, InfoWindow } from "@react-google-maps/api";  
 import { collection, getDocs, query, where, updateDoc, doc, increment } from "firebase/firestore";
 import { db } from "../lib/firebase";
-import { AlertTriangle, Video, ShieldAlert, Layers, X, CheckCircle, Loader2, PlusSquare } from "lucide-react";
+import { AlertTriangle, Video, ShieldAlert, Layers, X, CheckCircle, Loader2, PlusSquare, ZoomIn } from "lucide-react";
 
 const mapContainerStyle = {
   width: "100%",
@@ -53,6 +53,8 @@ export default function CommunityMap() {
   const [hazards, setHazards] = useState<any[]>([]);
   const [selectedHazard, setSelectedHazard] = useState<any>(null);
   const [hasUpvoted, setHasUpvoted] = useState(false);
+  const [imgLoaded, setImgLoaded] = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   
   // Real Places Data
   const [policeStations, setPoliceStations] = useState<any[]>([]);
@@ -269,7 +271,7 @@ export default function CommunityMap() {
             key={hazard.id} 
             position={{ lat: hazard.location?.lat || 30.9045, lng: hazard.location?.lng || 77.0967 }} 
             icon={getMarkerIcon("#EF4444")}
-            onClick={() => setSelectedHazard(hazard)}
+            onClick={() => { setSelectedHazard(hazard); setHasUpvoted(false); setImgLoaded(false); setLightboxOpen(false); }}
           />
         ))}
 
@@ -335,42 +337,118 @@ export default function CommunityMap() {
       <div 
         className={`absolute bottom-4 left-4 right-4 bg-white/95 dark:bg-[#18181B]/95 backdrop-blur-2xl border border-[#E2E8F0] dark:border-[#27272A] rounded-[24px] shadow-[0_10px_40px_rgba(0,0,0,0.2)] dark:shadow-[0_10px_40px_rgba(0,0,0,0.5)] transition-all duration-300 z-[500] p-5 ${selectedHazard ? 'translate-y-0 opacity-100 pointer-events-auto' : 'translate-y-[150%] opacity-0 pointer-events-none'}`}
       >
-        {selectedHazard && (
-          <div className="flex flex-col gap-3">
-            <div className="flex justify-between items-start">
-              <div className="flex-1 pr-4">
-                <span className="bg-[#FEF2F2] dark:bg-[#7F1D1D]/40 text-[#EF4444] dark:text-[#F87171] px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider mb-2 inline-block border border-[#FCA5A5] dark:border-[#991B1B]">
-                  Lvl {selectedHazard.analysis?.severity || 3} Hazard
-                </span>
-                <h3 className="text-[20px] leading-tight font-black text-[#1E293B] dark:text-[#E5E7EB] capitalize" style={{fontFamily: 'var(--font-jakarta)'}}>
-                  {selectedHazard.analysis?.subType || selectedHazard.analysis?.category || "Infrastructure Issue"}
-                </h3>
-                <p className="text-[#6B7280] dark:text-[#A1A1AA] text-[13px] mt-1 leading-relaxed line-clamp-2">
-                  {selectedHazard.location?.address}
-                </p>
+        {selectedHazard && (() => {
+          // Resolve image URL: prefer first item in media array, fallback to mediaUrl
+          const imgSrc: string =
+            (selectedHazard.media?.[0]?.url) ||
+            selectedHazard.mediaUrl ||
+            "";
+
+          return (
+            <div className="flex flex-col gap-3">
+
+              {/* ── PHOTO PREVIEW ── */}
+              {imgSrc && (
+                <div
+                  className="relative w-full rounded-[16px] overflow-hidden bg-[#F3F4F6] dark:bg-[#09090B] cursor-pointer group"
+                  style={{ height: "180px" }}
+                  onClick={() => setLightboxOpen(true)}
+                >
+                  {/* Skeleton shimmer while loading */}
+                  {!imgLoaded && (
+                    <div className="absolute inset-0 animate-pulse bg-gradient-to-r from-[#E5E7EB] via-[#F3F4F6] to-[#E5E7EB] dark:from-[#27272A] dark:via-[#3F3F46] dark:to-[#27272A]" />
+                  )}
+                  <img
+                    src={imgSrc}
+                    alt="Reported hazard"
+                    className={`w-full h-full object-cover transition-opacity duration-300 ${
+                      imgLoaded ? "opacity-100" : "opacity-0"
+                    }`}
+                    onLoad={() => setImgLoaded(true)}
+                    onError={() => setImgLoaded(true)} // hide skeleton even on error
+                  />
+                  {/* Zoom hint overlay */}
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                    <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 rounded-full p-2">
+                      <ZoomIn size={20} className="text-white" />
+                    </div>
+                  </div>
+                  {/* Badge */}
+                  <span className="absolute top-2 left-2 bg-black/60 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                    📷 Evidence Photo
+                  </span>
+                </div>
+              )}
+
+              <div className="flex justify-between items-start">
+                <div className="flex-1 pr-4">
+                  <span className="bg-[#FEF2F2] dark:bg-[#7F1D1D]/40 text-[#EF4444] dark:text-[#F87171] px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider mb-2 inline-block border border-[#FCA5A5] dark:border-[#991B1B]">
+                    Lvl {selectedHazard.analysis?.severity || 3} Hazard
+                  </span>
+                  <h3 className="text-[20px] leading-tight font-black text-[#1E293B] dark:text-[#E5E7EB] capitalize" style={{fontFamily: 'var(--font-jakarta)'}}>
+                    {selectedHazard.analysis?.subType || selectedHazard.analysis?.category || "Infrastructure Issue"}
+                  </h3>
+                  <p className="text-[#6B7280] dark:text-[#A1A1AA] text-[13px] mt-1 leading-relaxed line-clamp-2">
+                    {selectedHazard.location?.address}
+                  </p>
+                </div>
+                <button 
+                  onClick={() => setSelectedHazard(null)} 
+                  className="p-2 bg-[#F3F4F6] dark:bg-[#09090B] rounded-full text-[#6B7280] dark:text-[#A1A1AA] hover:text-[#1E293B] dark:hover:text-[#E5E7EB] active:scale-90 transition-transform shrink-0"
+                >
+                  <X size={18} />
+                </button>
               </div>
+
               <button 
-                onClick={() => setSelectedHazard(null)} 
-                className="p-2 bg-[#F3F4F6] dark:bg-[#09090B] rounded-full text-[#6B7280] dark:text-[#A1A1AA] hover:text-[#1E293B] dark:hover:text-[#E5E7EB] active:scale-90 transition-transform shrink-0"
+                onClick={() => handleISeeThisToo(selectedHazard.id)}
+                disabled={hasUpvoted}
+                className={`w-full font-bold text-[16px] h-[52px] rounded-[16px] flex justify-center items-center gap-2 mt-2 transition-all active:scale-[0.98] ${
+                  hasUpvoted 
+                    ? "bg-[#D1FAE5] dark:bg-[#064E3B] text-[#10B981] border border-[#10B981]/30" 
+                    : "bg-[#516B8B] dark:bg-[#27272A] text-white shadow-[0_8px_20px_rgba(81,107,139,0.25)] dark:shadow-none"
+                }`}
               >
-                <X size={18} />
+                {hasUpvoted ? <><CheckCircle size={20} /> Verified by You</> : <>✋ I See This Too</>}
               </button>
             </div>
-
-            <button 
-              onClick={() => handleISeeThisToo(selectedHazard.id)}
-              disabled={hasUpvoted}
-              className={`w-full font-bold text-[16px] h-[52px] rounded-[16px] flex justify-center items-center gap-2 mt-4 transition-all active:scale-[0.98] ${
-                hasUpvoted 
-                  ? "bg-[#D1FAE5] dark:bg-[#064E3B] text-[#10B981] border border-[#10B981]/30" 
-                  : "bg-[#516B8B] dark:bg-[#27272A] text-white shadow-[0_8px_20px_rgba(81,107,139,0.25)] dark:shadow-none"
-              }`}
-            >
-              {hasUpvoted ? <><CheckCircle size={20} /> Verified by You</> : <>✋ I See This Too</>}
-            </button>
-          </div>
-        )}
+          );
+        })()}
       </div>
+
+      {/* ── FULL-SCREEN LIGHTBOX ── */}
+      {lightboxOpen && selectedHazard && (() => {
+        const imgSrc: string =
+          (selectedHazard.media?.[0]?.url) ||
+          selectedHazard.mediaUrl ||
+          "";
+        return imgSrc ? (
+          <div
+            className="fixed inset-0 z-[9999] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4"
+            onClick={() => setLightboxOpen(false)}
+          >
+            <button
+              onClick={() => setLightboxOpen(false)}
+              className="absolute top-5 right-5 p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors"
+            >
+              <X size={22} />
+            </button>
+            <div
+              className="max-w-2xl w-full max-h-[85vh] rounded-[20px] overflow-hidden shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <img
+                src={imgSrc}
+                alt="Reported hazard – full view"
+                className="w-full h-full object-contain"
+              />
+            </div>
+            <p className="absolute bottom-5 text-white/50 text-[12px] font-medium">
+              Tap anywhere to close
+            </p>
+          </div>
+        ) : null;
+      })()}
 
     </div>
   );
