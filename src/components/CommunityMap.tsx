@@ -4,15 +4,14 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { GoogleMap, useLoadScript, Marker, Circle, InfoWindow } from "@react-google-maps/api";  
 import { collection, getDocs, query, where, updateDoc, doc, increment } from "firebase/firestore";
 import { db } from "../lib/firebase";
-import { AlertTriangle, Video, ShieldAlert, Layers, X, CheckCircle, Wind, Loader2 } from "lucide-react";
+import { AlertTriangle, Video, ShieldAlert, Layers, X, CheckCircle, Loader2, PlusSquare } from "lucide-react";
 
-// Google Maps requires fixed sizing for the container
 const mapContainerStyle = {
   width: "100%",
   height: "100%",
 };
 
-// Pure Stealth Dark Mode Style (Matches your #09090B / #18181B theme)
+// Pure Stealth Dark Mode Style
 const stealthMapStyle = [
   { elementType: "geometry", stylers: [{ color: "#09090B" }] },
   { elementType: "labels.text.stroke", stylers: [{ color: "#18181B" }] },
@@ -29,20 +28,25 @@ const stealthMapStyle = [
   { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#516B8B" }] },
 ];
 
-// Helper to generate a realistic local CCTV mock based on user location
-const generateLocalCCTV = (lat: number, lng: number) => {
-  return Array.from({ length: 6 }).map((_, i) => ({
+// FIX: Replaced random generation with fixed radial offsets so CCTV locations stay permanently anchored
+const generateFixedLocalCCTV = (lat: number, lng: number) => {
+  const fixedOffsets = [
+    { lat: 0.005, lng: 0.005 },   { lat: -0.005, lng: 0.008 },
+    { lat: 0.012, lng: -0.004 },  { lat: -0.008, lng: -0.009 },
+    { lat: 0.002, lng: -0.012 },  { lat: -0.011, lng: 0.003 },
+    { lat: 0.008, lng: 0.010 },   { lat: -0.010, lng: -0.002 }
+  ];
+  return fixedOffsets.map((offset, i) => ({
     id: `cctv-${i}`,
-    lat: lat + (Math.random() - 0.5) * 0.02,
-    lng: lng + (Math.random() - 0.5) * 0.02,
+    lat: lat + offset.lat,
+    lng: lng + offset.lng,
   }));
 };
 
 export default function CommunityMap() {
-  // Load Google Maps API
   const { isLoaded, loadError } = useLoadScript({
     googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY as string,
-    libraries: ["places"], // Required for finding police stations
+    libraries: ["places"], 
   });
 
   const [mapCenter, setMapCenter] = useState({ lat: 30.9045, lng: 77.0967 });
@@ -50,12 +54,16 @@ export default function CommunityMap() {
   const [selectedHazard, setSelectedHazard] = useState<any>(null);
   const [hasUpvoted, setHasUpvoted] = useState(false);
   
-  const [realSecurityZones, setRealSecurityZones] = useState<any[]>([]);
+  // Real Places Data
+  const [policeStations, setPoliceStations] = useState<any[]>([]);
+  const [hospitals, setHospitals] = useState<any[]>([]);
   const [mockCCTV, setMockCCTV] = useState<any[]>([]);
-  const [selectedZone, setSelectedZone] = useState<any>(null);
+  
+  // Unified state for InfoWindows (Police or Hospital)
+  const [selectedFacility, setSelectedFacility] = useState<any>(null);
 
   const [isLayersMenuOpen, setIsLayersMenuOpen] = useState(false);
-  const [layers, setLayers] = useState({ hazards: true, cctv: false, riskZones: true });
+  const [layers, setLayers] = useState({ hazards: true, cctv: false, police: true, hospitals: true });
 
   const mapRef = useRef<google.maps.Map | null>(null);
 
@@ -67,11 +75,14 @@ export default function CommunityMap() {
           const lat = position.coords.latitude;
           const lng = position.coords.longitude;
           setMapCenter({ lat, lng });
-          setMockCCTV(generateLocalCCTV(lat, lng));
+          setMockCCTV(generateFixedLocalCCTV(lat, lng));
         },
         (error) => console.warn("GPS Access Denied:", error),
         { enableHighAccuracy: true }
       );
+    } else {
+      // Fallback CCTV generation for default location
+      setMockCCTV(generateFixedLocalCCTV(mapCenter.lat, mapCenter.lng));
     }
 
     const fetchActiveHazards = async () => {
@@ -86,29 +97,51 @@ export default function CommunityMap() {
     fetchActiveHazards();
   }, []);
 
-  // 2. Fetch Real Police Stations via Google Places API once map loads
-  const onMapLoad = useCallback((map: google.maps.Map) => {
-    mapRef.current = map;
+  // 2. Helper to fetch Places API Data
+  const fetchPlacesData = (map: google.maps.Map, location: { lat: number, lng: number }) => {
     const service = new google.maps.places.PlacesService(map);
     
-    const request = {
-      location: mapCenter,
-      radius: 10000, // 10km
-      type: 'police',
-    };
-
-    service.nearbySearch(request, (results, status) => {
+    // Fetch Police Stations
+    service.nearbySearch({ location, radius: 10000, type: 'police' }, (results, status) => {
       if (status === google.maps.places.PlacesServiceStatus.OK && results) {
         const stations = results.map(place => ({
           id: place.place_id,
           lat: place.geometry?.location?.lat(),
           lng: place.geometry?.location?.lng(),
           name: place.name,
+          type: 'police'
         })).filter(p => p.lat && p.lng);
-        setRealSecurityZones(stations);
+        setPoliceStations(stations);
       }
     });
+
+    // Fetch Hospitals
+    service.nearbySearch({ location, radius: 10000, type: 'hospital' }, (results, status) => {
+      if (status === google.maps.places.PlacesServiceStatus.OK && results) {
+        const hosp = results.map(place => ({
+          id: place.place_id,
+          lat: place.geometry?.location?.lat(),
+          lng: place.geometry?.location?.lng(),
+          name: place.name,
+          type: 'hospital'
+        })).filter(p => p.lat && p.lng);
+        setHospitals(hosp);
+      }
+    });
+  };
+
+  // 3. Trigger fetch when map loads initially
+  const onMapLoad = useCallback((map: google.maps.Map) => {
+    mapRef.current = map;
+    fetchPlacesData(map, mapCenter);
   }, [mapCenter]);
+
+  // 4. Re-fetch if user's GPS updates the map center after map has loaded
+  useEffect(() => {
+    if (mapRef.current && isLoaded) {
+      fetchPlacesData(mapRef.current, mapCenter);
+    }
+  }, [mapCenter, isLoaded]);
 
   const toggleLayer = (layer: keyof typeof layers) => setLayers(prev => ({ ...prev, [layer]: !prev[layer] }));
 
@@ -123,7 +156,6 @@ export default function CommunityMap() {
     }
   };
 
-  // Google Maps custom SVG markers
   const getMarkerIcon = (color: string, scale: number = 8) => ({
     path: isLoaded ? google.maps.SymbolPath.CIRCLE : 0,
     fillColor: color,
@@ -162,9 +194,11 @@ export default function CommunityMap() {
         </button>
 
         {isLayersMenuOpen && (
-          <div className="bg-white/95 dark:bg-[#18181B]/95 backdrop-blur-xl border border-[#E2E8F0] dark:border-[#27272A] p-4 rounded-[24px] shadow-2xl w-[230px] animate-in fade-in slide-in-from-top-4">
+          <div className="bg-white/95 dark:bg-[#18181B]/95 backdrop-blur-xl border border-[#E2E8F0] dark:border-[#27272A] p-4 rounded-[24px] shadow-2xl w-[250px] animate-in fade-in slide-in-from-top-4">
             <h3 className="text-[#1E293B] dark:text-[#E5E7EB] font-bold mb-3 text-[14px]" style={{fontFamily: 'var(--font-jakarta)'}}>Map Layers</h3>
-            <div className="space-y-3">
+            <div className="space-y-4">
+              
+              {/* Hazards Layer */}
               <button onClick={() => toggleLayer("hazards")} className="flex items-center justify-between w-full">
                 <div className="flex items-center gap-2">
                   <AlertTriangle size={16} className={layers.hazards ? "text-[#EF4444]" : "text-[#9CA3AF] dark:text-[#71717A]"} />
@@ -175,6 +209,29 @@ export default function CommunityMap() {
                 </div>
               </button>
 
+              {/* Police Layer */}
+              <button onClick={() => toggleLayer("police")} className="flex items-center justify-between w-full">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert size={16} className={layers.police ? "text-[#F59E0B]" : "text-[#9CA3AF] dark:text-[#71717A]"} />
+                  <span className={`text-[13px] font-semibold ${layers.police ? 'text-[#1E293B] dark:text-[#E5E7EB]' : 'text-[#6B7280] dark:text-[#A1A1AA]'}`}>Police Stations</span>
+                </div>
+                <div className={`w-8 h-4 rounded-full transition-colors ${layers.police ? "bg-[#F59E0B]" : "bg-[#E5E7EB] dark:bg-[#27272A]"}`}>
+                  <div className={`w-4 h-4 bg-white rounded-full shadow transform transition-transform ${layers.police ? "translate-x-4" : "translate-x-0"}`} />
+                </div>
+              </button>
+
+              {/* Hospitals Layer */}
+              <button onClick={() => toggleLayer("hospitals")} className="flex items-center justify-between w-full">
+                <div className="flex items-center gap-2">
+                  <PlusSquare size={16} className={layers.hospitals ? "text-[#3B82F6]" : "text-[#9CA3AF] dark:text-[#71717A]"} />
+                  <span className={`text-[13px] font-semibold ${layers.hospitals ? 'text-[#1E293B] dark:text-[#E5E7EB]' : 'text-[#6B7280] dark:text-[#A1A1AA]'}`}>Hospitals & Clinics</span>
+                </div>
+                <div className={`w-8 h-4 rounded-full transition-colors ${layers.hospitals ? "bg-[#3B82F6]" : "bg-[#E5E7EB] dark:bg-[#27272A]"}`}>
+                  <div className={`w-4 h-4 bg-white rounded-full shadow transform transition-transform ${layers.hospitals ? "translate-x-4" : "translate-x-0"}`} />
+                </div>
+              </button>
+
+              {/* CCTV Layer */}
               <button onClick={() => toggleLayer("cctv")} className="flex items-center justify-between w-full">
                 <div className="flex items-center gap-2">
                   <Video size={16} className={layers.cctv ? "text-[#516B8B]" : "text-[#9CA3AF] dark:text-[#71717A]"} />
@@ -185,15 +242,6 @@ export default function CommunityMap() {
                 </div>
               </button>
 
-              <button onClick={() => toggleLayer("riskZones")} className="flex items-center justify-between w-full">
-                <div className="flex items-center gap-2">
-                  <ShieldAlert size={16} className={layers.riskZones ? "text-[#F59E0B]" : "text-[#9CA3AF] dark:text-[#71717A]"} />
-                  <span className={`text-[13px] font-semibold ${layers.riskZones ? 'text-[#1E293B] dark:text-[#E5E7EB]' : 'text-[#6B7280] dark:text-[#A1A1AA]'}`}>Police Stations</span>
-                </div>
-                <div className={`w-8 h-4 rounded-full transition-colors ${layers.riskZones ? "bg-[#F59E0B]" : "bg-[#E5E7EB] dark:bg-[#27272A]"}`}>
-                  <div className={`w-4 h-4 bg-white rounded-full shadow transform transition-transform ${layers.riskZones ? "translate-x-4" : "translate-x-0"}`} />
-                </div>
-              </button>
             </div>
           </div>
         )}
@@ -207,15 +255,15 @@ export default function CommunityMap() {
         onLoad={onMapLoad}
         options={{
           styles: stealthMapStyle,
-          disableDefaultUI: true, // Hides all the cluttered Google UI buttons
-          gestureHandling: "greedy", // Better mobile scrolling
+          disableDefaultUI: true,
+          gestureHandling: "greedy",
         }}
-        onClick={() => { setSelectedHazard(null); setSelectedZone(null); }}
+        onClick={() => { setSelectedHazard(null); setSelectedFacility(null); }}
       >
         {/* User Location Marker */}
         <Marker position={mapCenter} icon={getMarkerIcon("#10B981", 9)} />
 
-        {/* FIREBASE HAZARD DATA */}
+        {/* FIREBASE HAZARD DATA (RED) */}
         {layers.hazards && hazards.map((hazard) => (
           <Marker 
             key={hazard.id} 
@@ -225,7 +273,7 @@ export default function CommunityMap() {
           />
         ))}
 
-        {/* MOCKED CCTV DATA */}
+        {/* FIXED CCTV DATA (SLATE) */}
         {layers.cctv && mockCCTV.map((cam) => (
           <Circle 
             key={cam.id}
@@ -235,26 +283,52 @@ export default function CommunityMap() {
           />
         ))}
 
-        {/* GOOGLE PLACES API POLICE STATIONS */}
-        {layers.riskZones && realSecurityZones.map((zone) => (
-          <div key={zone.id}>
+        {/* POLICE STATIONS (AMBER) */}
+        {layers.police && policeStations.map((station) => (
+          <div key={station.id}>
             <Marker 
-              position={{ lat: zone.lat, lng: zone.lng }} 
+              position={{ lat: station.lat, lng: station.lng }} 
               icon={getMarkerIcon("#F59E0B")}
-              onClick={() => setSelectedZone(zone)}
+              onClick={() => setSelectedFacility(station)}
             />
             <Circle 
-              center={{ lat: zone.lat, lng: zone.lng }} 
+              center={{ lat: station.lat, lng: station.lng }} 
               radius={400} 
               options={{ fillColor: "#F59E0B", fillOpacity: 0.1, strokeColor: "#F59E0B", strokeWeight: 2, strokeOpacity: 0.5 }} 
             />
-            {selectedZone?.id === zone.id && (
-              <InfoWindow position={{ lat: zone.lat, lng: zone.lng }} onCloseClick={() => setSelectedZone(null)}>
-                <div className="text-black font-bold p-1">{zone.name}</div>
-              </InfoWindow>
-            )}
           </div>
         ))}
+
+        {/* HOSPITALS (BLUE) */}
+        {layers.hospitals && hospitals.map((hospital) => (
+          <div key={hospital.id}>
+            <Marker 
+              position={{ lat: hospital.lat, lng: hospital.lng }} 
+              icon={getMarkerIcon("#3B82F6")}
+              onClick={() => setSelectedFacility(hospital)}
+            />
+            <Circle 
+              center={{ lat: hospital.lat, lng: hospital.lng }} 
+              radius={400} 
+              options={{ fillColor: "#3B82F6", fillOpacity: 0.1, strokeColor: "#3B82F6", strokeWeight: 2, strokeOpacity: 0.5 }} 
+            />
+          </div>
+        ))}
+
+        {/* UNIFIED INFO WINDOW FOR FACILITIES (POLICE / HOSPITAL) */}
+        {selectedFacility && (
+          <InfoWindow 
+            position={{ lat: selectedFacility.lat, lng: selectedFacility.lng }} 
+            onCloseClick={() => setSelectedFacility(null)}
+          >
+            <div className="text-black font-bold p-1">
+              <div className={`text-[10px] uppercase mb-1 ${selectedFacility.type === 'hospital' ? 'text-blue-600' : 'text-amber-600'}`}>
+                {selectedFacility.type === 'hospital' ? 'Medical Facility' : 'Police Station'}
+              </div>
+              {selectedFacility.name}
+            </div>
+          </InfoWindow>
+        )}
       </GoogleMap>
 
       {/* BOTTOM SHEET FOR SELECTED HAZARD */}
