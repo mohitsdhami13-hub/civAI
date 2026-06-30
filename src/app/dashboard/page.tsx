@@ -6,7 +6,7 @@ import { db } from "../../lib/firebase";
 import { 
   Car, Droplet, Lightbulb, AlertTriangle, Trophy, Loader2, 
   Phone, Mail, Send, CheckCircle, FileText, ChevronDown, ChevronUp, Trash2,
-  Inbox, History, Share2, ExternalLink, Link as LinkIcon, ShieldAlert, Copy, Check
+  Inbox, History, Share2, ExternalLink, Link as LinkIcon, ShieldAlert, Copy, Check, Video
 } from "lucide-react";
 import Link from "next/link";
 
@@ -332,6 +332,22 @@ export default function DashboardPage() {
                   const isNationalFallback = authority?.matchTier === "national";
                   const jurisdictionWarning = draft.agentResult?.jurisdiction_warning;
 
+                  // FIX (show the photo on draft cards too): same treatment
+                  // as filed history below — only applies once the draft is
+                  // "ready" (processing state keeps the spinning loader icon
+                  // since that's a meaningful status signal, not just
+                  // decorative). Falls back to category icon for video-only
+                  // drafts or anything missing a usable image preview.
+                  const draftFirstMedia = draft.media?.[0];
+                  const draftPreviewUrl = isReady
+                    ? (draftFirstMedia && !draftFirstMedia.mimeType?.startsWith("video/") ? draftFirstMedia.url : null) ||
+                      (draft.mediaUrl && !draft.mediaType?.startsWith("video/") ? draft.mediaUrl : null)
+                    : null;
+                  const draftMediaCount = draft.media?.length || (draft.mediaUrl ? 1 : 0);
+                  const draftHasVideoOnly = isReady && !draftPreviewUrl && (
+                    draftFirstMedia?.mimeType?.startsWith("video/") || draft.mediaType?.startsWith("video/")
+                  );
+
                   return (
                     <div 
                       key={draft.id} 
@@ -339,8 +355,31 @@ export default function DashboardPage() {
                       className={`bg-white dark:bg-[#18181B] border border-[#E2E8F0] dark:border-transparent rounded-[24px] p-4 flex flex-col shadow-sm transition-all ${isReady ? 'cursor-pointer border-l-4 border-l-[#10B981]' : ''}`}
                     >
                       <div className="flex items-start gap-4">
-                        <div className={`w-14 h-14 rounded-[16px] ${catConfig.bg} flex items-center justify-center shrink-0`}>
-                          <Icon size={24} className={`${catConfig.color} ${isProcessing ? 'animate-spin' : ''}`} strokeWidth={2.5} />
+                        <div className={`relative w-14 h-14 rounded-[16px] ${draftPreviewUrl ? '' : catConfig.bg} flex items-center justify-center shrink-0 overflow-hidden`}>
+                          {draftPreviewUrl ? (
+                            <img
+                              src={draftPreviewUrl}
+                              alt="Captured issue"
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                            />
+                          ) : draftHasVideoOnly ? (
+                            <div className="w-full h-full bg-[#1E293B] dark:bg-[#27272A] flex items-center justify-center">
+                              <Video size={20} className="text-white/80" strokeWidth={2} />
+                            </div>
+                          ) : (
+                            <Icon size={24} className={`${catConfig.color} ${isProcessing ? 'animate-spin' : ''}`} strokeWidth={2.5} />
+                          )}
+                          {draftPreviewUrl && (
+                            <div className={`absolute bottom-0 right-0 w-5 h-5 rounded-tl-lg ${catConfig.bg} flex items-center justify-center`}>
+                              <Icon size={11} className={catConfig.color} strokeWidth={2.5} />
+                            </div>
+                          )}
+                          {draftMediaCount > 1 && (
+                            <div className="absolute top-0.5 right-0.5 bg-black/60 text-white text-[9px] font-bold px-1 rounded">
+                              +{draftMediaCount - 1}
+                            </div>
+                          )}
                         </div>
                         
                         <div className="flex-1 pt-1">
@@ -521,12 +560,55 @@ export default function DashboardPage() {
                     const Icon = catConfig.Icon;
                     const locationShort = complaint.location?.address?.split(',')[0] || "Unknown location";
 
+                    // FIX (show the actual photo in report history): the card
+                    // used to always render a generic category icon, even
+                    // though the original photo/video is sitting right in
+                    // Firestore via `media` (array, current schema) or the
+                    // older single `mediaUrl` field (pre-multi-capture
+                    // reports). Prefer the first image in `media`; fall back
+                    // to mediaUrl if it's an image; if all we have is a
+                    // video with no thumbnail, fall back to the category
+                    // icon rather than showing a broken/black video frame.
+                    const firstMedia = complaint.media?.[0];
+                    const previewUrl =
+                      (firstMedia && !firstMedia.mimeType?.startsWith("video/") ? firstMedia.url : null) ||
+                      (complaint.mediaUrl && !complaint.mediaType?.startsWith("video/") ? complaint.mediaUrl : null);
+                    const mediaCount = complaint.media?.length || (complaint.mediaUrl ? 1 : 0);
+                    const hasVideoOnly = !previewUrl && (
+                      firstMedia?.mimeType?.startsWith("video/") || complaint.mediaType?.startsWith("video/")
+                    );
+
                     return (
                       <div key={complaint.id} className="relative">
                         <Link href={`/track/${complaint.complaintId || complaint.id}`}>
                           <div className="bg-white dark:bg-[#18181B] border border-[#E2E8F0] dark:border-transparent rounded-[24px] p-4 flex items-start gap-4 shadow-sm active:scale-[0.98] transition-all">
-                            <div className={`w-14 h-14 rounded-[16px] ${catConfig.bg} flex items-center justify-center shrink-0`}>
-                              <Icon size={24} className={catConfig.color} strokeWidth={2.5} />
+                            <div className={`relative w-14 h-14 rounded-[16px] ${previewUrl ? '' : catConfig.bg} flex items-center justify-center shrink-0 overflow-hidden`}>
+                              {previewUrl ? (
+                                <img
+                                  src={previewUrl}
+                                  alt="Reported issue"
+                                  className="w-full h-full object-cover"
+                                  loading="lazy"
+                                />
+                              ) : hasVideoOnly ? (
+                                <div className="w-full h-full bg-[#1E293B] dark:bg-[#27272A] flex items-center justify-center">
+                                  <Video size={20} className="text-white/80" strokeWidth={2} />
+                                </div>
+                              ) : (
+                                <Icon size={24} className={catConfig.color} strokeWidth={2.5} />
+                              )}
+                              {/* small category badge in the corner when showing a real photo,
+                                  so the category is still glanceable even with the thumbnail */}
+                              {previewUrl && (
+                                <div className={`absolute bottom-0 right-0 w-5 h-5 rounded-tl-lg ${catConfig.bg} flex items-center justify-center`}>
+                                  <Icon size={11} className={catConfig.color} strokeWidth={2.5} />
+                                </div>
+                              )}
+                              {mediaCount > 1 && (
+                                <div className="absolute top-0.5 right-0.5 bg-black/60 text-white text-[9px] font-bold px-1 rounded">
+                                  +{mediaCount - 1}
+                                </div>
+                              )}
                             </div>
                             
                             {/*
