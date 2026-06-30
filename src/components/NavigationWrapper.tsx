@@ -84,13 +84,34 @@ export default function NavigationWrapper({ children }: { children: React.ReactN
   if (slideDir === "right") animClass += " slide-in-from-left-12";
 
   return (
+    // FIX (blank space + double-counted dvh):
+    // min-h-[100dvh] removed from this wrapper. There were THREE nested
+    // 100dvh containers fighting each other: <body> in layout.tsx, this
+    // div, and (previously) <main> in page.tsx. That's what produced the
+    // inconsistent blank space — each one recalculates dvh independently
+    // when the mobile browser's address bar shows/hides, and nesting them
+    // compounds the desync. body's min-h-[100dvh] in layout.tsx is now the
+    // single height authority; everything else just flows naturally.
     <div 
-      className="flex flex-col min-h-[100dvh] w-full overflow-x-hidden"
+      className="flex flex-col w-full overflow-x-hidden"
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEndHandler}
     >
-      <div key={pathname} className={`flex-1 w-full max-w-md mx-auto ${animClass}`}>
+      {/*
+        FIX (Submit button / page content hidden behind bottom nav):
+        The <nav> below is `fixed bottom-0`, which pulls it out of normal
+        document flow — it floats ON TOP of whatever is at the bottom of
+        the page rather than pushing content up to make room for itself.
+        Nothing here was reserving space for its 76px height, so any
+        content rendered near the bottom of a page (like the "Submit
+        report" button on the home page) ended up physically underneath
+        the nav bar and invisible, exactly as shown in the screenshot.
+        pb-[92px] reserves 76px (nav height) + ~16px breathing room so the
+        page can scroll its content fully clear of the fixed nav. If you
+        add/remove nav height later, keep this in sync (nav height + ~16px).
+      */}
+      <div key={pathname} className={`flex-1 w-full max-w-md mx-auto pb-[92px] ${animClass}`}>
         {children}
       </div>
 

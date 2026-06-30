@@ -41,57 +41,33 @@ export default function Home() {
   const [pipelineStatus, setPipelineStatus] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
 
-  // Video Recording States
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const videoChunks = useRef<BlobPart[]>([]);
 
-  // Multi-capture queue
   const [capturedItems, setCapturedItems] = useState<CapturedItem[]>([]);
   const [description, setDescription] = useState("");
 
-  // Location — now an explicit, visible state machine instead of a silent
-  // background call. This is what makes the permission prompt behavior
-  // visible/debuggable instead of "nothing happens."
   const [locationState, setLocationState] = useState<LocationState>("idle");
   const [cityName, setCityName] = useState<string | null>(null);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
 
-  // Camera error — surfaced explicitly instead of silently opening gallery.
   const [cameraError, setCameraError] = useState<CameraErrorReason>(null);
-  // Tracks whether the live <video> actually has frames yet, separate from
-  // "stream exists." This closes the gap where the 60vh box appeared
-  // instantly but stayed blank for a beat while the camera warmed up.
   const [videoReady, setVideoReady] = useState(false);
-  // Proactive permission state read via the Permissions API where supported,
-  // so we can warn the user *before* they tap "Take photo" if Chrome has
-  // already silently revoked a previously-granted permission (the
-  // auto-cancel behavior described). null = unknown/unsupported API.
   const [cameraPermState, setCameraPermState] = useState<PermissionState | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // Separate input strictly for the camera-capture fallback, so we never
-  // confuse "user explicitly chose gallery" with "camera failed, here's gallery"
-  const cameraFallbackInputRef = useRef<HTMLInputElement>(null);
 
   const currentUserId = "user_solan_resident_01";
 
   // --- LOCATION ---
-  // FIX: previously this fired silently on mount with no UI feedback at all,
-  // so on browsers/webviews that suppress or delay the permission prompt,
-  // it looked like "the app never asks." Now it's wrapped in a visible
-  // state + a retry button is shown if it's denied/unsupported.
   const requestLocation = () => {
     if (typeof window === "undefined" || !("geolocation" in navigator)) {
       setLocationState("unsupported");
       return;
     }
-    // navigator.geolocation requires a secure context (https or localhost).
-    // On plain http:// hosting, the browser silently refuses to even show
-    // the prompt — this check makes that failure mode visible instead of
-    // looking like nothing happened.
     if (typeof window !== "undefined" && !window.isSecureContext) {
       setLocationState("denied");
       return;
@@ -121,8 +97,7 @@ export default function Home() {
           // Reverse geocoding failed — coords still saved, just no city label
         }
       },
-      (geoErr) => {
-        // geoErr.code: 1 = PERMISSION_DENIED, 2 = POSITION_UNAVAILABLE, 3 = TIMEOUT
+      () => {
         setLocationState("denied");
       },
       { enableHighAccuracy: false, timeout: 8000 }
@@ -135,13 +110,11 @@ export default function Home() {
   }, []);
 
   // --- PROACTIVE PERMISSION CHECK ---
-  // Chrome on Android silently auto-revokes camera/mic permission for sites
-  // that are dismissed/ignored repeatedly ("abusive permission" heuristics)
-  // or unused for a while. When that happens, getUserMedia() just throws
-  // NotAllowedError again with zero warning beforehand. Polling
-  // navigator.permissions.query lets us catch that *before* the user taps
-  // the button, so we can show a calmer, more specific prompt instead of
-  // them hitting a wall and having to dig through Chrome settings blind.
+  // FIX: previously this set cameraPermState directly from query results,
+  // and "prompt" (meaning "never asked yet, totally normal") was being
+  // treated the same as a real denial in some code paths. A fresh reset
+  // permission reports as "prompt", not "denied" — that state should NOT
+  // show any warning banner. Only an actual "denied" result should.
   useEffect(() => {
     if (typeof navigator === "undefined" || !("permissions" in navigator)) return;
 
@@ -149,16 +122,14 @@ export default function Home() {
 
     (async () => {
       try {
-        // 'camera' isn't in the TS lib.dom PermissionName union in all
-        // versions, hence the cast — it is supported in Chrome.
         cameraStatus = await navigator.permissions.query({ name: "camera" as PermissionName });
         setCameraPermState(cameraStatus.state);
         cameraStatus.onchange = () => {
           if (cameraStatus) setCameraPermState(cameraStatus.state);
         };
       } catch {
-        // Permissions API doesn't support 'camera' on this browser — silently
-        // fall back to the reactive getUserMedia error path instead.
+        // Permissions API doesn't support 'camera' on this browser/version —
+        // fall back entirely to the reactive getUserMedia error path below.
       }
     })();
 
@@ -168,11 +139,22 @@ export default function Home() {
   }, []);
 
   // --- CAMERA PIPELINE ---
-  // FIX: previously any getUserMedia failure silently triggered the gallery
-  // file picker with zero explanation, which is exactly the bug you saw
-  // ("Take photo just opens gallery"). Now we classify *why* it failed and
-  // show that to the user, and gallery is offered as an explicit choice
-  // rather than a silent substitution.
+  // FIX (camera never even prompting after a permission reset):
+  // The previous version requested { video: { facingMode: "environment" } }.
+  // On some Android/Chrome + device camera combinations, facingMode as a
+  // bare (non-"ideal") constraint is resolved as a HARD constraint during
+  // device enumeration — if the browser can't immediately confirm a back
+  // camera satisfies it, getUserMedia can throw OverconstrainedError before
+  // the permission dialog is ever shown. That perfectly explains "location
+  // prompted fine, camera never prompted at all" — the call was failing at
+  // the constraint-resolution step, before reaching the permission step.
+  //
+  // Fix: request with facingMode as "ideal" (a soft preference, never
+  // blocks on failure to match) on the first attempt. If that still throws,
+  // retry once with NO constraints at all (just { video: true }), which is
+  // the most universally compatible request and will reliably trigger the
+  // permission prompt on a fresh/reset permission state. Only if both
+  // attempts fail do we surface a real error.
   const startCameraPipeline = async () => {
     triggerHaptic(30);
     setError(null);
@@ -188,34 +170,54 @@ export default function Home() {
       return;
     }
 
-    try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-        audio: false,
-      });
+    const attachStream = (mediaStream: MediaStream) => {
       setStream(mediaStream);
-      // FIX (blank 60vh box): previously a blind setTimeout(50) attached
-      // srcObject and hoped for the best, so the box jumped to 60vh
-      // instantly while staying visually empty until the camera warmed
-      // up. Now we attach srcObject as soon as the ref exists, and flip
-      // videoReady only once the video element actually reports it has
-      // dimensions/frames (onloadedmetadata), so the UI can show a
-      // spinner during that gap instead of a blank card.
       requestAnimationFrame(() => {
         if (videoRef.current) {
           videoRef.current.srcObject = mediaStream;
           videoRef.current.onloadedmetadata = () => setVideoReady(true);
         }
       });
-    } catch (err: any) {
-      console.warn("Camera access failed:", err?.name, err?.message);
-      if (err?.name === "NotAllowedError" || err?.name === "SecurityError") {
+    };
+
+    try {
+      // Attempt 1: prefer the back camera, but don't hard-require it.
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: false,
+      });
+      attachStream(mediaStream);
+      return;
+    } catch (firstErr: any) {
+      console.warn("Camera attempt 1 (ideal back camera) failed:", firstErr?.name, firstErr?.message);
+
+      // If the user explicitly denied permission, retrying won't help —
+      // surface that immediately rather than prompting twice.
+      if (firstErr?.name === "NotAllowedError" || firstErr?.name === "SecurityError") {
         setCameraError("denied");
         setCameraPermState("denied");
-      } else if (err?.name === "NotFoundError" || err?.name === "OverconstrainedError") {
-        setCameraError("not-found");
-      } else {
-        setCameraError("unknown");
+        return;
+      }
+
+      // Any other failure (most commonly OverconstrainedError from the
+      // facingMode constraint) — retry with the simplest possible request.
+      try {
+        const fallbackStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
+        });
+        attachStream(fallbackStream);
+        return;
+      } catch (secondErr: any) {
+        console.warn("Camera attempt 2 (no constraints) failed:", secondErr?.name, secondErr?.message);
+        if (secondErr?.name === "NotAllowedError" || secondErr?.name === "SecurityError") {
+          setCameraError("denied");
+          setCameraPermState("denied");
+        } else if (secondErr?.name === "NotFoundError" || secondErr?.name === "OverconstrainedError") {
+          setCameraError("not-found");
+        } else {
+          setCameraError("unknown");
+        }
       }
     }
   };
@@ -450,11 +452,6 @@ export default function Home() {
   // ──────────────────────────────────────────────────────────────────────────
 
   return (
-    // FIX (blank space / keyboard breakage):
-    // min-h-[100dvh] removed from here — <body> in layout.tsx is now the
-    // single height authority. This page just flows naturally inside it,
-    // so there's no longer a second dvh container fighting the first when
-    // the mobile keyboard opens or the browser chrome collapses/expands.
     <main className="w-full max-w-md mx-auto flex flex-col gap-4 px-5 pt-2 pb-6 bg-[#F7F5F0] dark:bg-[#161616]">
       <style dangerouslySetInnerHTML={{ __html: `
         @keyframes scan { 0%,100%{transform:translateY(0)} 50%{transform:translateY(160px)} }
@@ -468,7 +465,6 @@ export default function Home() {
       {/* ── HERO + STATS (hidden when camera active) ── */}
       {!stream && (
         <>
-          {/* Hero card */}
           <div className="rounded-[20px] px-6 py-[22px] relative bg-white dark:bg-[#1e1e1e]">
             <div className="flex items-center gap-1.5 mb-2">
               <p className="text-[11px] font-semibold tracking-[1.2px] uppercase text-[#516B8B] dark:text-[#B6C2D2]">
@@ -485,9 +481,6 @@ export default function Home() {
               {cityName ? `Fix ${cityName} together` : "Fix your city together"}
             </p>
 
-            {/* Location permission retry — only shows if denied/unsupported,
-                gives users a visible, explicit way to grant it rather than
-                it silently never working. */}
             {(locationState === "denied" || locationState === "unsupported") && (
               <button
                 onClick={requestLocation}
@@ -500,7 +493,6 @@ export default function Home() {
               </button>
             )}
 
-            {/* accent circle */}
             <div className="absolute right-5 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full flex items-center justify-center bg-[#EEF1F6] dark:bg-[#1c2330] border border-[#D4DAE4] dark:border-[rgba(182,194,210,0.18)]">
               <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
                 <path d="M11 4v3M11 15v3M4 11h3M15 11h3"
@@ -513,7 +505,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Stat cards */}
           <div className="grid grid-cols-2 gap-2.5">
             <div className="rounded-[16px] p-4 flex items-center gap-3 bg-white dark:bg-[#1e1e1e]">
               <div className="w-[38px] h-[38px] rounded-[12px] flex items-center justify-center shrink-0 bg-[#EEF1F6] dark:bg-[#1c2330]">
@@ -551,22 +542,12 @@ export default function Home() {
       )}
 
       {/* ── SCANNER / CAMERA ZONE ── */}
-      {/*
-        FIX (blank space before camera actually shows anything):
-        Previously this jumped straight from min-h-[200px] to a fixed
-        h-[60vh] the instant `stream` was set, but the <video> had no
-        frames yet for a beat — so users saw an empty 60vh box. Now the
-        height transition is the same, but we render a spinner overlay
-        for that exact gap (stream exists but videoReady is false), so
-        there's never a moment of "blank" — only idle, loading, or live.
-      */}
       <div
         className={`relative w-full ${
           stream ? "h-[60vh]" : "min-h-[200px]"
         } rounded-[20px] overflow-hidden flex flex-col items-center justify-center transition-all duration-300 bg-white dark:bg-[#1e1e1e]`}
       >
         {stream ? (
-          /* ── LIVE CAMERA VIEW ── */
           <>
             <video
               ref={videoRef}
@@ -578,7 +559,6 @@ export default function Home() {
               }`}
             />
 
-            {/* Camera warming up — fills the gap instead of a blank box */}
             {!videoReady && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10">
                 <div
@@ -623,7 +603,6 @@ export default function Home() {
             )}
           </>
         ) : (
-          /* ── IDLE SCANNER UI ── */
           <div className="flex flex-col items-center justify-center gap-0 px-6 pb-6 pt-7 w-full">
             <div className="w-24 h-24 rounded-full flex items-center justify-center mb-[18px] border border-[#D4DAE4] dark:border-[rgba(182,194,210,0.15)]">
               <div className="w-[72px] h-[72px] rounded-full flex items-center justify-center border border-[#C2CAD6] dark:border-[rgba(182,194,210,0.25)]">
@@ -657,25 +636,24 @@ export default function Home() {
             )}
 
             {/*
-              Proactive warning — Chrome on Android sometimes auto-revokes
-              a previously granted camera permission (after repeated
-              dismissals or inactivity). Without this, the user taps "Take
-              photo," nothing happens or it silently fails, and they have
-              no idea they need to dig through Chrome's site settings. This
-              catches that state ahead of time via the Permissions API.
+              FIX: only show this banner for an actual confirmed "denied"
+              state. "prompt" (never asked / freshly reset) must NOT trigger
+              this warning — that was incorrectly conflating "haven't asked
+              yet" with "user said no," which made a freshly reset
+              permission look broken before the user even got a chance to
+              tap the button.
             */}
             {cameraPermState === "denied" && !cameraError && (
               <div className="w-full mb-3 rounded-[12px] px-3.5 py-3 flex gap-2 bg-[#FFF7ED] dark:bg-[#2A1F12] border border-[#FDBA74]/50 dark:border-[#92400E]/50">
                 <AlertCircle size={15} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
                 <div className="text-[12px] leading-snug text-amber-700 dark:text-amber-400">
-                  Camera access was turned off, likely by Chrome automatically.
+                  Camera access is currently turned off for this site.
                   Tap the lock/info icon in your address bar → Permissions →
-                  turn Camera back on, then return here.
+                  turn Camera on, then return here.
                 </div>
               </div>
             )}
 
-            {/* Explicit camera error — replaces the old silent fallback */}
             {cameraErrorMessage && (
               <div className="w-full mb-3 rounded-[12px] px-3.5 py-3 flex gap-2 bg-[#FEF2F2] dark:bg-[#2A1717] border border-[#FCA5A5]/50 dark:border-[#7F1D1D]/50">
                 <AlertCircle size={15} className="text-red-500 dark:text-red-400 shrink-0 mt-0.5" />
@@ -691,7 +669,6 @@ export default function Home() {
               </p>
             )}
 
-            {/* ── ACTION BUTTONS ── */}
             {!isProcessing && (
               <div className="grid grid-cols-2 gap-2.5 w-full">
                 <button
@@ -729,7 +706,6 @@ export default function Home() {
         )}
 
         <canvas ref={canvasRef} className="hidden" />
-        {/* Explicit gallery input — chosen by the user directly */}
         <input
           type="file"
           ref={fileInputRef}
@@ -836,17 +812,6 @@ export default function Home() {
             </button>
           </div>
 
-          {/*
-            FIX (UI breaking when typing): the textarea itself was never the
-            problem — it was the double 100dvh containers fighting the
-            keyboard. With layout.tsx now using interactive-widget:
-            resizes-content and only ONE dvh authority (body), this field
-            resizes correctly instead of getting squeezed/overlapped.
-            font-size kept at 16px equivalent (text-[16px] on focus would
-            be ideal, but 14px below 16px can trigger iOS Safari's
-            auto-zoom-on-focus, which is its own layout-jump bug) — using
-            16px here specifically to prevent that.
-          */}
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
