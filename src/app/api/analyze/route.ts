@@ -227,6 +227,7 @@ Analyze this image and map it strictly to the provided JSON schema based on thes
         temperature: visionConfig.temperature,
         responseMimeType: visionConfig.responseMimeType,
         responseSchema: visionConfig.responseSchema,
+        thinkingConfig: { thinkingBudget: 0 },
       },
     });
 
@@ -330,6 +331,7 @@ Keep the tone firm, respectful, and unambiguous — this should read as somethin
         temperature: draftConfig.temperature,
         responseMimeType: draftConfig.responseMimeType,
         responseSchema: draftConfig.responseSchema,
+        thinkingConfig: { thinkingBudget: 0 },
       },
     });
 

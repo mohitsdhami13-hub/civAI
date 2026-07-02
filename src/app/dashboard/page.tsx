@@ -364,6 +364,10 @@ export default function DashboardPage() {
                             <div className={`h-full rounded-full transition-all duration-500 ${isReady ? 'bg-[#10B981] w-full' : isFailed ? 'bg-[#EF4444] w-full' : 'bg-[#F59E0B] w-[35%] animate-pulse'}`} />
                           </div>
 
+                          {isFailed && draft.error && (
+                            <p className="text-[11px] text-[#EF4444] font-medium mt-2 line-clamp-2">{draft.error}</p>
+                          )}
+
                           {isReady && (
                             <div className="text-[11px] text-[#516B8B] dark:text-[#A1A1AA] font-bold flex items-center gap-1 mt-2.5">
                               {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />} Click to review & deploy
