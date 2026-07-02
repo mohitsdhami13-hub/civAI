@@ -1,10 +1,23 @@
 import { NextResponse } from "next/server";
-import { GoogleGenAI } from "@google/genai";
 import authorityMap from "@/data/authority_map.json";
 
-export const runtime = "edge";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+const GEMINI_BASE_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+async function callGemini(body: object): Promise<any> {
+  const res = await fetch(GEMINI_BASE_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Gemini API error ${res.status}: ${errText}`);
+  }
+  const json = await res.json();
+  const text = json?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+  return { text };
+}
 
 const timeout = (ms: number, message: string = "Request timed out") =>
   new Promise<never>((_, reject) => setTimeout(() => reject(new Error(message)), ms));
@@ -148,7 +161,7 @@ export async function POST(request: Request) {
 
     const visionConfig: any = {
       temperature: 0.0,
-      thinkingConfig: { thinkingLevel: "low" },
+      thinkingConfig: { thinkingBudget: 0 },
       responseMimeType: "application/json",
       responseSchema: {
         type: "object",
@@ -200,25 +213,28 @@ ${CIVIC_CATEGORY_PROMPT_LIST}
 
 Analyze this image and map it strictly to the provided JSON schema based on these rules.`;
 
-    const visionCallFn = () => ai.models.generateContent({
-      model: VISION_MODEL,
+    const visionCallFn = () => callGemini({
       contents: [
         {
           role: "user",
           parts: [
             { text: strictPrompt },
-            { inlineData: { data: base64String, mimeType: mimeType } },
+            { inlineData: { data: base64String, mimeType } },
           ],
         },
       ],
-      config: visionConfig,
+      generationConfig: {
+        temperature: visionConfig.temperature,
+        responseMimeType: visionConfig.responseMimeType,
+        responseSchema: visionConfig.responseSchema,
+      },
     });
 
     const [geocodeData, visionResponse] = await Promise.all([
       geocodePromise,
       Promise.race([
         withRetry(visionCallFn),
-        timeout(35000, "Vision AI took too long to respond.")
+        timeout(55000, "Vision AI took too long to respond.")
       ])
     ]);
     const { addressName, district, state, city } = geocodeData;
@@ -265,7 +281,7 @@ Analyze this image and map it strictly to the provided JSON schema based on thes
     // ==========================================
     const draftConfig: any = {
       temperature: 0.2,
-      thinkingConfig: { thinkingLevel: "low" },
+      thinkingConfig: { thinkingBudget: 0 },
       responseMimeType: "application/json",
       responseSchema: {
         type: "object",
@@ -308,15 +324,18 @@ Write the email_body as a genuinely formal grievance letter a citizen could send
 - Close formally, identifying the sender as "A Concerned Resident" filing via the CivicAI platform.
 Keep the tone firm, respectful, and unambiguous — this should read as something that compels a response, not a casual report. Keep formal_complaint and whatsapp_message in the same factual, professional register but more concise for those channels.`;
 
-    const draftCallFn = () => ai.models.generateContent({
-      model: VISION_MODEL,
+    const draftCallFn = () => callGemini({
       contents: [{ role: "user", parts: [{ text: draftPrompt }] }],
-      config: draftConfig
+      generationConfig: {
+        temperature: draftConfig.temperature,
+        responseMimeType: draftConfig.responseMimeType,
+        responseSchema: draftConfig.responseSchema,
+      },
     });
 
     const draftResponse: any = await Promise.race([
       withRetry(draftCallFn),
-      timeout(25000, "Drafting AI took too long to respond.")
+      timeout(40000, "Drafting AI took too long to respond.")
     ]);
 
     let agentResult;
