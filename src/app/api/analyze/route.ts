@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import authorityMap from "@/data/authority_map.json";
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
-const GEMINI_BASE_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+export const maxDuration = 120;
 
-async function callGemini(body: object): Promise<any> {
-  const res = await fetch(GEMINI_BASE_URL, {
+async function callGemini(body: object, timeoutMs = 75000): Promise<any> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${process.env.GEMINI_API_KEY || ""}`;
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) {
     const errText = await res.text();
@@ -27,9 +28,9 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 1, delayMs = 2000): 
     return await fn();
   } catch (err: any) {
     const is503 = err?.message?.includes('503') ||
-                  err?.message?.includes('UNAVAILABLE') ||
-                  err?.message?.includes('High Demand') ||
-                  err?.message?.includes('high demand');
+      err?.message?.includes('UNAVAILABLE') ||
+      err?.message?.includes('High Demand') ||
+      err?.message?.includes('high demand');
     if (retries > 0 && is503) {
       console.warn(`Gemini 503 — retrying in ${delayMs}ms...`);
       await new Promise(r => setTimeout(r, delayMs));
@@ -235,7 +236,7 @@ Analyze this image and map it strictly to the provided JSON schema based on thes
       geocodePromise,
       Promise.race([
         withRetry(visionCallFn),
-        timeout(55000, "Vision AI took too long to respond.")
+        timeout(80000, "Vision AI took too long to respond.")
       ])
     ]);
     const { addressName, district, state, city } = geocodeData;
