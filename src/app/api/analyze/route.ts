@@ -3,7 +3,7 @@ import authorityMap from "@/data/authority_map.json";
 
 export const maxDuration = 120;
 
-async function callGemini(body: object, timeoutMs = 75000): Promise<any> {
+async function callGemini(body: object, timeoutMs = 110000): Promise<any> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${process.env.GEMINI_API_KEY || ""}`;
   const res = await fetch(url, {
     method: "POST",
@@ -20,8 +20,8 @@ async function callGemini(body: object, timeoutMs = 75000): Promise<any> {
   return { text };
 }
 
-const timeout = (ms: number, message: string = "Request timed out") =>
-  new Promise<never>((_, reject) => setTimeout(() => reject(new Error(message)), ms));
+// timeout helper removed — we rely on the 110s AbortSignal in callGemini
+// and the 120s maxDuration on the route itself.
 
 async function withRetry<T>(fn: () => Promise<T>, retries = 1, delayMs = 2000): Promise<T> {
   try {
@@ -234,10 +234,7 @@ Analyze this image and map it strictly to the provided JSON schema based on thes
 
     const [geocodeData, visionResponse] = await Promise.all([
       geocodePromise,
-      Promise.race([
-        withRetry(visionCallFn),
-        timeout(80000, "Vision AI took too long to respond.")
-      ])
+      withRetry(visionCallFn),
     ]);
     const { addressName, district, state, city } = geocodeData;
 
@@ -336,10 +333,7 @@ Keep the tone firm, respectful, and unambiguous — this should read as somethin
       },
     });
 
-    const draftResponse: any = await Promise.race([
-      withRetry(draftCallFn),
-      timeout(40000, "Drafting AI took too long to respond.")
-    ]);
+    const draftResponse: any = await withRetry(draftCallFn);
 
     let agentResult;
     try {

@@ -26,7 +26,7 @@ export default function DashboardPage() {
   const [expandedDraftId, setExpandedDraftId] = useState<string | null>(null);
   const [isSubmittingId, setIsSubmittingId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-
+  const [processingIds, setProcessingIds] = useState<Set<string>>(new Set());
   const [copiedDraftId, setCopiedDraftId] = useState<string | null>(null);
 
   const currentUserId = "user_solan_resident_01";
@@ -74,6 +74,23 @@ export default function DashboardPage() {
       unsubscribePending();
     };
   }, []);
+
+  // Notify user when a queued report finishes processing
+  useEffect(() => {
+    pendingReports.forEach((report) => {
+      if (processingIds.has(report.id)) {
+        if (report.status === 'ready') {
+          triggerToast('✅ Your report is ready to review!');
+          setProcessingIds((prev) => { const next = new Set(prev); next.delete(report.id); return next; });
+        } else if (report.status === 'failed') {
+          triggerToast('⚠️ Analysis complete — see details below.');
+          setProcessingIds((prev) => { const next = new Set(prev); next.delete(report.id); return next; });
+        }
+      } else if (report.status === 'processing') {
+        setProcessingIds((prev) => new Set(prev).add(report.id));
+      }
+    });
+  }, [pendingReports]);
 
   const finalizeDraftReport = async (draft: any) => {
     triggerHaptic(30);
@@ -347,7 +364,7 @@ export default function DashboardPage() {
                         <div className="flex-1 pt-1">
                           <div className="flex justify-between items-start mb-1">
                             <h3 className="font-bold text-[16px] text-[#1E293B] dark:text-[#E5E7EB] capitalize leading-tight pr-2 line-clamp-1">
-                              {isReady ? (draft.visionData?.sub_type || draft.visionData?.issue_category) : isFailed ? "Analysis Failed" : "AI Processing Anomaly..."}
+                              {isReady ? (draft.visionData?.sub_type || draft.visionData?.issue_category) : isFailed ? "Analysis Failed" : "Analyzing your report..."}
                             </h3>
                             <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider shrink-0 ${
                               isReady ? 'bg-[#D1FAE5] text-[#10B981]' : isFailed ? 'bg-[#FEE2E2] text-[#EF4444]' : 'bg-[#FEF3C7] text-[#D97706]'
@@ -357,12 +374,18 @@ export default function DashboardPage() {
                           </div>
                           
                           <p className="text-[12px] font-semibold text-[#6B7280] dark:text-[#A1A1AA]">
-                            {isReady ? draft.agentResult?.resolved_location_name?.split(',')[0] : "Extracting Coordinates..."} • {formatDate(draft.createdAt)}
+                            {isReady ? draft.agentResult?.resolved_location_name?.split(',')[0] : isFailed ? 'Analysis failed' : 'AI is analyzing...'} • {formatDate(draft.createdAt)}
                           </p>
 
                           <div className="w-full h-1 bg-[#F3F4F6] dark:bg-[#09090B] rounded-full mt-3 overflow-hidden">
                             <div className={`h-full rounded-full transition-all duration-500 ${isReady ? 'bg-[#10B981] w-full' : isFailed ? 'bg-[#EF4444] w-full' : 'bg-[#F59E0B] w-[35%] animate-pulse'}`} />
                           </div>
+
+                          {isProcessing && (
+                            <p className="text-[11px] text-[#D97706] font-semibold mt-2 leading-snug">
+                              AI is working on your report — this can take 30–60 seconds. You'll be notified when it's done.
+                            </p>
+                          )}
 
                           {isFailed && draft.error && (
                             <p className="text-[11px] text-[#EF4444] font-medium mt-2 line-clamp-2">{draft.error}</p>
